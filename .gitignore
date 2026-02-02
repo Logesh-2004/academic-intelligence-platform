@@ -3,3 +3,8 @@ __pycache__/
 *.pyc
 .env
 .streamlit/
+data/
+*.xlsx
+models/
+__pycache__/
+.venv/
