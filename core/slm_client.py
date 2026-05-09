@@ -11,7 +11,7 @@ OLLAMA_URL = f"{OLLAMA_BASE_URL}/api/generate"
 OLLAMA_TAGS_URL = f"{OLLAMA_BASE_URL}/api/tags"
 MODEL_NAME = os.getenv("OLLAMA_MODEL", "mistral")
 DEFAULT_AI_FALLBACK = (
-    "AI insights are temporarily unavailable. Please check the local Ollama service and try again."
+    "AI insights are temporarily unavailable. The dashboard is still ready to use without the generated summary."
 )
 PREFERRED_MODEL_NAMES = (
     "mistral",
@@ -34,7 +34,7 @@ def _read_int_env(name: str, default: int, minimum: int = 1) -> int:
         return default
 
 
-REQUEST_TIMEOUT_SECONDS = _read_int_env("OLLAMA_TIMEOUT_SECONDS", 120, minimum=30)
+REQUEST_TIMEOUT_SECONDS = _read_int_env("OLLAMA_TIMEOUT_SECONDS", 60, minimum=10)
 CONNECT_TIMEOUT_SECONDS = _read_int_env("OLLAMA_CONNECT_TIMEOUT_SECONDS", 5, minimum=1)
 DISCOVERY_TIMEOUT_SECONDS = _read_int_env("OLLAMA_DISCOVERY_TIMEOUT_SECONDS", 5, minimum=1)
 GENERATION_OPTIONS = {

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import base64
 from html import escape
+from pathlib import Path
 from typing import Any, Callable, Iterable
 
 import pandas as pd
@@ -16,21 +18,38 @@ from core.slm_client import (
 )
 from core.student_analytics import student_summary
 
-AUTH_USERS: dict[str, dict[str, Any]] = {
-    "Student": {
-        "user": "student1",
-        "pass": "123",
-        "register_number": "24BAE001",
+FACULTY_USERS: dict[str, dict[str, Any]] = {
+    "faculty_aero_1": {
+        "password": "123",
+        "department": "AERONAUTICAL",
+        "subjects": [
+            "Engineering Mechanics",
+            "Materials Science for Aeronautical Engineering",
+        ],
     },
-    "Faculty": {
-        "user": "faculty1",
-        "pass": "123",
-        "course_code": "24CSI101",
+    "faculty_ece_1": {
+        "password": "123",
+        "department": "ECE",
+        "subjects": [
+            "Digital Electronics",
+            "Signals and Systems",
+        ],
     },
-    "Mentor": {
-        "user": "mentor1",
-        "pass": "123",
-        "mentee_ids": [
+    "faculty_cse_1": {
+        "password": "123",
+        "department": "CSE",
+        "subjects": [
+            "Data Structures",
+            "DBMS",
+        ],
+    },
+}
+
+MENTOR_USERS: dict[str, dict[str, Any]] = {
+    "mentor_aero_1": {
+        "password": "123",
+        "department": "AERONAUTICAL",
+        "mentees": [
             "24BAE001",
             "24BAE002",
             "24BAE003",
@@ -38,25 +57,76 @@ AUTH_USERS: dict[str, dict[str, Any]] = {
             "24BAE005",
             "24BAE006",
         ],
+    }
+}
+
+HOD_USERS: dict[str, dict[str, Any]] = {
+    "hod_aero": {
+        "password": "123",
+        "department": "AERONAUTICAL",
     },
-    "HOD": {
-        "user": "hod1",
-        "pass": "123",
-        "department": "Aeronautical Engineering",
+    "hod_ece": {
+        "password": "123",
+        "department": "ECE",
     },
-    "Principal": {
-        "user": "principal1",
-        "pass": "123",
+    "hod_cse": {
+        "password": "123",
+        "department": "CSE",
+    },
+    "hod_mech": {
+        "password": "123",
+        "department": "MECH",
+    },
+    "hod_civil": {
+        "password": "123",
+        "department": "CIVIL",
     },
 }
 
+PRINCIPAL_USERS: dict[str, dict[str, Any]] = {
+    "principal1": {
+        "password": "123",
+    }
+}
+
+ROLE_USERS: dict[str, dict[str, dict[str, Any]]] = {
+    "Faculty": FACULTY_USERS,
+    "Mentor": MENTOR_USERS,
+    "HOD": HOD_USERS,
+    "Principal": PRINCIPAL_USERS,
+}
+
+ROLE_OPTIONS = ["Student", "Faculty", "Mentor", "HOD", "Principal"]
+
 ROLE_SECTIONS: dict[str, list[str]] = {
     "Student": ["Dashboard", "Subject Analytics"],
-    "Faculty": ["Dashboard", "Subject Analytics", "Dataset Preview"],
-    "Mentor": ["Dashboard", "Subject Analytics", "Dataset Preview"],
-    "HOD": ["Dashboard", "Subject Analytics", "New Student Projection", "Dataset Preview"],
+    "Faculty": ["Dashboard", "Subject Analytics"],
+    "Mentor": ["Dashboard", "Subject Analytics"],
+    "HOD": ["Dashboard", "Subject Analytics", "Dataset Preview"],
     "Principal": ["Dashboard", "Subject Analytics", "New Student Projection", "Dataset Preview"],
 }
+
+DEPARTMENT_LABELS = {
+    "AERONAUTICAL": "Aeronautical Engineering",
+    "ECE": "ECE",
+    "CSE": "CSE",
+    "MECH": "MECH",
+    "CIVIL": "CIVIL",
+}
+
+DEPARTMENT_ALIASES = {
+    "AERONAUTICAL": {"AERONAUTICAL", "AERONAUTICAL ENGINEERING", "AERO"},
+    "ECE": {"ECE", "ELECTRONICS AND COMMUNICATION", "ELECTRONICS AND COMMUNICATION ENGINEERING"},
+    "CSE": {"CSE", "COMPUTER SCIENCE", "COMPUTER SCIENCE ENGINEERING"},
+    "MECH": {"MECH", "MECHANICAL", "MECHANICAL ENGINEERING"},
+    "CIVIL": {"CIVIL", "CIVIL ENGINEERING"},
+}
+
+ACADEMIC_FEEDBACK_PATH = "data/academic_feedback.csv"
+CAREER_FEEDBACK_PATH = "data/career_support.csv"
+ASSET_DIR = Path(__file__).resolve().parent.parent / "assets"
+LOGIN_BACKGROUND_PATH = ASSET_DIR / "login_bg.png"
+DASHBOARD_BACKGROUND_PATH = ASSET_DIR / "dashboard_bg.png"
 
 WEAK_MARK_THRESHOLD = 35
 HIGH_GAP_THRESHOLD = 20
@@ -90,41 +160,345 @@ REQUIRED_PROJECTION_COLUMNS = [
 ]
 
 
+@st.cache_data(show_spinner=False)
+def load_image_data_uri(path: str) -> str:
+    image_path = Path(path)
+    if not image_path.exists():
+        return ""
+
+    encoded = base64.b64encode(image_path.read_bytes()).decode("ascii")
+    suffix = image_path.suffix.lower().lstrip(".") or "png"
+    return f"data:image/{suffix};base64,{encoded}"
+
+
+def apply_login_background() -> None:
+    image_uri = load_image_data_uri(str(LOGIN_BACKGROUND_PATH))
+    if not image_uri:
+        return
+
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            position: relative;
+            background: #07111d !important;
+            overflow-x: hidden;
+        }}
+
+        .stApp::before {{
+            content: "";
+            position: fixed;
+            inset: 0;
+            background-image:
+                linear-gradient(135deg, rgba(4, 11, 22, 0.74) 0%, rgba(9, 22, 35, 0.58) 46%, rgba(12, 31, 38, 0.54) 100%),
+                url("{image_uri}");
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            filter: blur(1.4px) brightness(0.84) saturate(0.98);
+            opacity: 0.98;
+            transform: scale(1.015);
+            pointer-events: none;
+            z-index: 0;
+        }}
+
+        .stApp::after {{
+            content: "";
+            position: fixed;
+            inset: 0;
+            background:
+                radial-gradient(circle at 16% 18%, rgba(255, 255, 255, 0.16), transparent 24%),
+                radial-gradient(circle at 82% 12%, rgba(47, 143, 104, 0.2), transparent 28%),
+                linear-gradient(180deg, rgba(5, 12, 24, 0.18), rgba(5, 12, 24, 0.42));
+            pointer-events: none;
+            z-index: 0;
+        }}
+
+        [data-testid="stAppViewContainer"],
+        [data-testid="stSidebar"],
+        header[data-testid="stHeader"] {{
+            position: relative;
+            z-index: 1;
+        }}
+
+        header[data-testid="stHeader"] {{
+            background: transparent;
+        }}
+
+        .block-container {{
+            padding-top: 2.6rem;
+        }}
+
+        .login-shell {{
+            background:
+                linear-gradient(145deg, rgba(255, 255, 255, 0.82), rgba(235, 244, 246, 0.68));
+            border: 1px solid rgba(255, 255, 255, 0.34);
+            box-shadow:
+                0 32px 80px rgba(0, 0, 0, 0.34),
+                0 2px 0 rgba(255, 255, 255, 0.58) inset,
+                0 -18px 34px rgba(14, 54, 70, 0.1) inset;
+            backdrop-filter: blur(20px);
+        }}
+
+        .login-brand {{
+            background:
+                linear-gradient(145deg, rgba(8, 22, 37, 0.84), rgba(24, 98, 128, 0.74) 58%, rgba(41, 118, 86, 0.76));
+            border-color: rgba(255, 255, 255, 0.26);
+            box-shadow:
+                0 36px 90px rgba(0, 0, 0, 0.38),
+                0 2px 0 rgba(255, 255, 255, 0.2) inset;
+        }}
+
+        .login-access {{
+            background:
+                linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(238, 246, 247, 0.78));
+            border-top-color: rgba(30, 111, 143, 0.82);
+        }}
+
+        div[data-testid="stForm"] {{
+            background:
+                linear-gradient(145deg, rgba(255, 255, 255, 0.94), rgba(241, 247, 248, 0.86));
+            border: 1px solid rgba(255, 255, 255, 0.42);
+            box-shadow:
+                0 30px 72px rgba(0, 0, 0, 0.28),
+                0 2px 0 rgba(255, 255, 255, 0.82) inset;
+            backdrop-filter: blur(18px);
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def apply_intro_background() -> None:
+    image_uri = load_image_data_uri(str(LOGIN_BACKGROUND_PATH))
+    if not image_uri:
+        return
+
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            position: relative;
+            background: #07111d !important;
+            overflow-x: hidden;
+        }}
+
+        .stApp::before {{
+            content: "";
+            position: fixed;
+            inset: 0;
+            background-image:
+                linear-gradient(180deg, rgba(4, 11, 22, 0.18) 0%, rgba(4, 11, 22, 0.18) 48%, rgba(4, 11, 22, 0.5) 100%),
+                url("{image_uri}");
+            background-size: cover;
+            background-position: center;
+            background-repeat: no-repeat;
+            filter: brightness(0.9) saturate(1.02);
+            pointer-events: none;
+            z-index: 0;
+        }}
+
+        .stApp::after {{
+            content: "";
+            position: fixed;
+            inset: 0;
+            background:
+                linear-gradient(90deg, rgba(5, 12, 24, 0.52) 0%, rgba(5, 12, 24, 0.18) 44%, rgba(5, 12, 24, 0.2) 100%);
+            pointer-events: none;
+            z-index: 0;
+        }}
+
+        [data-testid="stAppViewContainer"],
+        header[data-testid="stHeader"] {{
+            position: relative;
+            z-index: 1;
+        }}
+
+        header[data-testid="stHeader"] {{
+            background: transparent;
+        }}
+
+        .block-container {{
+            max-width: 1180px;
+            padding-top: 17vh;
+            padding-bottom: 4rem;
+        }}
+
+        .intro-cover {{
+            min-height: 68vh;
+            display: flex;
+            flex-direction: column;
+            justify-content: flex-end;
+            align-items: flex-start;
+        }}
+
+        .intro-copy {{
+            max-width: 720px;
+            color: #ffffff;
+            text-shadow: 0 14px 32px rgba(0, 0, 0, 0.36);
+        }}
+
+        .intro-kicker {{
+            display: inline-flex;
+            align-items: center;
+            padding: 0.38rem 0.82rem;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.16);
+            border: 1px solid rgba(255, 255, 255, 0.26);
+            color: #f2fbff;
+            font-size: 0.78rem;
+            font-weight: 850;
+            text-transform: uppercase;
+            letter-spacing: 0;
+            backdrop-filter: blur(12px);
+        }}
+
+        .intro-title {{
+            margin: 1rem 0 0.65rem 0;
+            font-size: clamp(2.2rem, 5vw, 4.8rem);
+            line-height: 1;
+            font-weight: 880;
+        }}
+
+        .intro-subtitle {{
+            max-width: 610px;
+            margin: 0;
+            color: rgba(244, 250, 252, 0.9);
+            font-size: clamp(1rem, 1.5vw, 1.24rem);
+            line-height: 1.6;
+        }}
+
+        .intro-prompt {{
+            margin-top: 1.35rem;
+            color: rgba(244, 250, 252, 0.84);
+            font-size: 0.92rem;
+            font-weight: 720;
+        }}
+
+        div[data-testid="stButton"] > button {{
+            width: 220px;
+            min-height: 3.1rem;
+            margin-top: 1.1rem;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.36);
+            background:
+                linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(221, 240, 245, 0.9));
+            color: #102438;
+            font-weight: 850;
+            box-shadow:
+                0 24px 50px rgba(0, 0, 0, 0.28),
+                0 2px 0 rgba(255, 255, 255, 0.95) inset;
+            transition: transform 160ms ease, box-shadow 160ms ease;
+        }}
+
+        div[data-testid="stButton"] > button:hover {{
+            transform: translateY(-2px);
+            box-shadow:
+                0 30px 64px rgba(0, 0, 0, 0.34),
+                0 2px 0 rgba(255, 255, 255, 0.95) inset;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def apply_dashboard_background() -> None:
+    image_uri = load_image_data_uri(str(DASHBOARD_BACKGROUND_PATH))
+    if not image_uri:
+        return
+
+    st.markdown(
+        f"""
+        <style>
+        .stApp {{
+            position: relative;
+            overflow-x: hidden;
+        }}
+
+        .stApp::after {{
+            content: "";
+            position: fixed;
+            top: 1.5rem;
+            right: -7vw;
+            width: min(860px, 62vw);
+            height: min(700px, 74vh);
+            background-image: url("{image_uri}");
+            background-size: contain;
+            background-position: top right;
+            background-repeat: no-repeat;
+            opacity: 0.078;
+            filter: grayscale(4%) saturate(0.98);
+            pointer-events: none;
+            z-index: 0;
+        }}
+
+        [data-testid="stAppViewContainer"],
+        [data-testid="stSidebar"],
+        header[data-testid="stHeader"] {{
+            position: relative;
+            z-index: 1;
+        }}
+
+        header[data-testid="stHeader"] {{
+            background: rgba(245, 247, 251, 0.78);
+            backdrop-filter: blur(10px);
+        }}
+
+        .hero-panel,
+        .panel,
+        .feedback-section,
+        div[data-testid="stMetric"],
+        div[data-testid="stDataFrame"] {{
+            position: relative;
+            z-index: 2;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
 def apply_theme() -> None:
     st.markdown(
         """
         <style>
         :root {
-            --bg: #08111f;
-            --card: rgba(15, 24, 39, 0.78);
-            --border: rgba(148, 163, 184, 0.18);
-            --text: #e5eef9;
-            --muted: #95a7c3;
-            --accent: #5bc0ff;
-            --accent-soft: rgba(91, 192, 255, 0.12);
-            --success: #3fd29a;
-            --shadow: 0 20px 50px rgba(0, 0, 0, 0.28);
+            --bg: #f5f7fb;
+            --card: rgba(255, 255, 255, 0.84);
+            --card-strong: rgba(255, 255, 255, 0.94);
+            --border: rgba(35, 55, 85, 0.14);
+            --text: #162033;
+            --muted: #607089;
+            --accent: #1e6f8f;
+            --accent-2: #5b7c3b;
+            --accent-3: #a46a1f;
+            --accent-soft: rgba(30, 111, 143, 0.1);
+            --success: #2f8f68;
+            --shadow: 0 18px 42px rgba(36, 51, 77, 0.14);
+            --shadow-soft: 0 8px 24px rgba(36, 51, 77, 0.1);
         }
 
         .stApp {
             background:
-                radial-gradient(circle at top left, rgba(91, 192, 255, 0.12), transparent 24%),
-                radial-gradient(circle at top right, rgba(63, 210, 154, 0.08), transparent 20%),
-                linear-gradient(180deg, #07101c 0%, #0a1424 40%, #09101b 100%);
+                linear-gradient(135deg, rgba(218, 229, 235, 0.98) 0%, rgba(250, 247, 240, 0.96) 44%, rgba(228, 238, 229, 0.98) 100%);
+            background-color: #e8eef1;
             color: var(--text);
-            font-family: "Trebuchet MS", "Segoe UI", sans-serif;
+            font-family: "Inter", "Segoe UI", "Trebuchet MS", sans-serif;
         }
 
         .block-container {
-            padding-top: 1.2rem;
-            padding-bottom: 2rem;
+            padding-top: 1.3rem;
+            padding-bottom: 2.2rem;
             max-width: 1440px;
         }
 
         [data-testid="stSidebar"] {
             background:
-                linear-gradient(180deg, rgba(7, 15, 27, 0.98) 0%, rgba(10, 18, 32, 0.98) 100%);
+                linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(239, 246, 244, 0.94) 100%);
             border-right: 1px solid var(--border);
+            box-shadow: 12px 0 30px rgba(36, 51, 77, 0.08);
         }
 
         [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
@@ -133,33 +507,63 @@ def apply_theme() -> None:
             color: var(--text);
         }
 
+        h1, h2, h3, h4 {
+            color: var(--text);
+            letter-spacing: 0;
+        }
+
+        p, li, label, span {
+            letter-spacing: 0;
+        }
+
         div[data-baseweb="select"] > div,
         div[data-baseweb="input"] > div,
         div[data-testid="stTextInput"] input,
         div[data-testid="stNumberInput"] input {
-            background: rgba(8, 17, 31, 0.9);
+            background: rgba(255, 255, 255, 0.98);
             color: var(--text);
-            border-color: var(--border);
+            border: 1px solid rgba(22, 32, 51, 0.18);
+            border-radius: 12px;
+            box-shadow:
+                inset 0 1px 0 rgba(255, 255, 255, 0.9),
+                0 8px 18px rgba(36, 51, 77, 0.08);
+        }
+
+        div[data-baseweb="select"] > div:focus-within,
+        div[data-testid="stTextInput"] input:focus,
+        div[data-testid="stNumberInput"] input:focus {
+            border-color: rgba(30, 111, 143, 0.46);
+            box-shadow:
+                0 0 0 3px rgba(30, 111, 143, 0.12),
+                0 10px 22px rgba(36, 51, 77, 0.1);
         }
 
         div[data-testid="stFileUploader"] {
-            background: rgba(8, 17, 31, 0.8);
-            border: 1px dashed rgba(91, 192, 255, 0.32);
-            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.76);
+            border: 1px dashed rgba(30, 111, 143, 0.34);
+            border-radius: 14px;
             padding: 0.6rem;
         }
 
         div[data-testid="stMetric"] {
-            background: rgba(8, 17, 31, 0.82);
+            background:
+                linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(246, 250, 248, 0.9));
             border: 1px solid var(--border);
-            border-radius: 18px;
-            padding: 0.7rem 0.9rem;
+            border-radius: 14px;
+            padding: 0.85rem 0.95rem;
+            box-shadow: var(--shadow-soft);
+            transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+        }
+
+        div[data-testid="stMetric"]:hover {
+            border-color: rgba(30, 111, 143, 0.28);
             box-shadow: var(--shadow);
+            transform: translateY(-2px);
         }
 
         div[data-testid="stMetricLabel"] {
             color: var(--muted);
-            font-weight: 700;
+            font-weight: 750;
         }
 
         div[data-testid="stMetricValue"] {
@@ -168,31 +572,43 @@ def apply_theme() -> None:
 
         div[data-testid="stDataFrame"] {
             border: 1px solid var(--border);
-            border-radius: 18px;
+            border-radius: 14px;
             overflow: hidden;
-            background: rgba(8, 17, 31, 0.72);
+            background: rgba(255, 255, 255, 0.86);
+            box-shadow: var(--shadow-soft);
         }
 
         button[kind="primary"] {
-            background: linear-gradient(135deg, #1f6feb 0%, #38bdf8 100%);
+            background: linear-gradient(135deg, #1e6f8f 0%, #2f8f68 100%);
             border: none;
             color: #ffffff;
+            border-radius: 12px;
+            box-shadow: 0 10px 22px rgba(30, 111, 143, 0.2);
         }
 
         button[kind="secondary"] {
-            background: rgba(8, 17, 31, 0.88);
+            background: rgba(255, 255, 255, 0.9);
             border: 1px solid var(--border);
             color: var(--text);
+            border-radius: 12px;
+            transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+        }
+
+        button[kind="secondary"]:hover {
+            border-color: rgba(30, 111, 143, 0.32);
+            box-shadow: 0 8px 20px rgba(36, 51, 77, 0.12);
+            transform: translateY(-1px);
         }
 
         .hero-panel {
             background:
-                linear-gradient(135deg, rgba(12, 25, 45, 0.96) 0%, rgba(10, 18, 32, 0.92) 100%);
+                linear-gradient(135deg, rgba(255, 255, 255, 0.96) 0%, rgba(239, 247, 247, 0.88) 58%, rgba(250, 245, 235, 0.86) 100%);
             border: 1px solid var(--border);
-            border-radius: 28px;
-            padding: 1.3rem 1.5rem;
+            border-radius: 18px;
+            padding: 1.35rem 1.5rem;
             box-shadow: var(--shadow);
             margin-bottom: 1rem;
+            backdrop-filter: blur(14px);
         }
 
         .hero-kicker {
@@ -205,7 +621,7 @@ def apply_theme() -> None:
             font-size: 0.78rem;
             font-weight: 800;
             text-transform: uppercase;
-            letter-spacing: 0.05em;
+            letter-spacing: 0;
         }
 
         .hero-title {
@@ -224,12 +640,13 @@ def apply_theme() -> None:
         }
 
         .panel {
-            background: rgba(8, 17, 31, 0.78);
+            background: var(--card);
             border: 1px solid var(--border);
-            border-radius: 22px;
+            border-radius: 16px;
             padding: 1rem 1.05rem;
-            box-shadow: var(--shadow);
+            box-shadow: var(--shadow-soft);
             margin-bottom: 1rem;
+            backdrop-filter: blur(14px);
         }
 
         .panel-title {
@@ -251,18 +668,212 @@ def apply_theme() -> None:
             gap: 0.35rem;
             border-radius: 999px;
             padding: 0.3rem 0.72rem;
-            background: rgba(63, 210, 154, 0.12);
+            background: rgba(47, 143, 104, 0.12);
             color: var(--success);
             font-size: 0.82rem;
             font-weight: 700;
         }
 
         .login-shell {
-            background: rgba(10, 18, 32, 0.82);
-            border: 1px solid var(--border);
-            border-radius: 28px;
-            padding: 1.2rem 1.25rem;
-            box-shadow: var(--shadow);
+            background:
+                linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(236, 244, 245, 0.94));
+            border: 1px solid rgba(22, 32, 51, 0.12);
+            border-radius: 20px;
+            padding: 1.25rem;
+            box-shadow:
+                0 28px 60px rgba(36, 51, 77, 0.18),
+                0 2px 0 rgba(255, 255, 255, 0.92) inset,
+                0 -16px 32px rgba(30, 111, 143, 0.05) inset;
+            backdrop-filter: blur(16px);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .login-brand {
+            min-height: 100%;
+            display: flex;
+            flex-direction: column;
+            justify-content: space-between;
+            gap: 1rem;
+            background:
+                linear-gradient(145deg, #102438 0%, #1f6f8f 56%, #2f8f68 100%);
+            border-color: rgba(255, 255, 255, 0.28);
+            box-shadow:
+                0 32px 70px rgba(16, 36, 56, 0.3),
+                0 2px 0 rgba(255, 255, 255, 0.22) inset;
+        }
+
+        .login-brand::after {
+            content: "";
+            position: absolute;
+            right: -48px;
+            bottom: -54px;
+            width: 220px;
+            height: 150px;
+            border: 1px solid rgba(255, 255, 255, 0.18);
+            background:
+                linear-gradient(145deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.04));
+            transform: rotate(-12deg);
+            pointer-events: none;
+        }
+
+        .login-brand .hero-kicker {
+            background: rgba(255, 255, 255, 0.16);
+            color: #e9fbff;
+            border: 1px solid rgba(255, 255, 255, 0.24);
+        }
+
+        .login-brand .hero-title {
+            color: #ffffff;
+            text-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+        }
+
+        .login-brand .hero-copy {
+            color: rgba(244, 250, 252, 0.9);
+        }
+
+        .login-access {
+            border-top: 4px solid #1e6f8f;
+        }
+
+        .login-access .hero-title {
+            color: #102438;
+        }
+
+        div[data-testid="stForm"] {
+            background:
+                linear-gradient(145deg, rgba(255, 255, 255, 0.99), rgba(241, 246, 247, 0.96));
+            border: 1px solid rgba(22, 32, 51, 0.12);
+            border-radius: 18px;
+            padding: 1rem 1rem 1.15rem 1rem;
+            box-shadow:
+                0 24px 52px rgba(36, 51, 77, 0.15),
+                0 2px 0 rgba(255, 255, 255, 0.95) inset;
+            margin-top: 0.9rem;
+        }
+
+        div[data-testid="stForm"] label {
+            color: #162033;
+            font-weight: 760;
+        }
+
+        .login-badge-row {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.55rem;
+            margin-top: 1rem;
+        }
+
+        .mini-badge {
+            border: 1px solid rgba(255, 255, 255, 0.22);
+            background: rgba(255, 255, 255, 0.14);
+            border-radius: 999px;
+            color: #f4fafc;
+            font-size: 0.82rem;
+            font-weight: 700;
+            padding: 0.35rem 0.7rem;
+            box-shadow: 0 10px 22px rgba(0, 0, 0, 0.12);
+        }
+
+        .credential-note {
+            color: #4f6077;
+            font-size: 0.9rem;
+            line-height: 1.55;
+            margin: 0.35rem 0 0.85rem 0;
+        }
+
+        div[data-testid="stExpander"] details {
+            background: rgba(255, 255, 255, 0.86);
+            border: 1px solid rgba(22, 32, 51, 0.12);
+            border-radius: 14px;
+            box-shadow: 0 16px 34px rgba(36, 51, 77, 0.1);
+        }
+
+        .feedback-section {
+            border: 1px solid rgba(30, 111, 143, 0.18);
+            background:
+                linear-gradient(145deg, rgba(255, 255, 255, 0.82), rgba(243, 249, 247, 0.72));
+            border-radius: 18px;
+            box-shadow: var(--shadow-soft);
+            padding: 1rem;
+            margin: 1rem 0;
+            backdrop-filter: blur(16px);
+        }
+
+        .feedback-header {
+            display: flex;
+            justify-content: space-between;
+            gap: 1rem;
+            align-items: flex-start;
+            margin-bottom: 0.85rem;
+        }
+
+        .feedback-title {
+            color: var(--text);
+            font-size: 1.08rem;
+            font-weight: 850;
+            margin: 0;
+        }
+
+        .feedback-subtitle {
+            color: var(--muted);
+            font-size: 0.9rem;
+            margin: 0.2rem 0 0 0;
+            line-height: 1.45;
+        }
+
+        .feedback-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+            gap: 0.8rem;
+        }
+
+        .feedback-card {
+            min-height: 118px;
+            border: 1px solid rgba(35, 55, 85, 0.12);
+            border-radius: 14px;
+            padding: 0.85rem;
+            background:
+                linear-gradient(150deg, rgba(255, 255, 255, 0.96), rgba(248, 246, 239, 0.78));
+            box-shadow: 0 10px 24px rgba(36, 51, 77, 0.08);
+            transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
+        }
+
+        .feedback-card:hover {
+            transform: translateY(-2px);
+            border-color: rgba(30, 111, 143, 0.26);
+            box-shadow: 0 16px 32px rgba(36, 51, 77, 0.14);
+        }
+
+        .feedback-label {
+            color: var(--accent);
+            font-size: 0.78rem;
+            font-weight: 850;
+            text-transform: uppercase;
+            letter-spacing: 0;
+            margin-bottom: 0.45rem;
+        }
+
+        .feedback-value {
+            color: var(--text);
+            font-size: 0.96rem;
+            line-height: 1.45;
+            word-break: break-word;
+        }
+
+        .feedback-empty {
+            color: var(--muted);
+            font-style: italic;
+        }
+
+        @media (max-width: 768px) {
+            .hero-title {
+                font-size: 1.55rem;
+            }
+
+            .feedback-header {
+                display: block;
+            }
         }
         </style>
         """,
@@ -273,6 +884,7 @@ def apply_theme() -> None:
 def initialize_session_state() -> None:
     defaults = {
         "authenticated": False,
+        "intro_seen": False,
         "user_role": None,
         "username": None,
         "user_profile": {},
@@ -298,68 +910,208 @@ def logout() -> None:
     _rerun()
 
 
+def normalize_roll_number(value: Any) -> str:
+    return "".join(str(value or "").upper().strip().split())
+
+
+@st.cache_data(show_spinner=False)
+def load_student_login_registers() -> list[str]:
+    from core.preprocess import load_subject_data
+
+    df = load_subject_data()
+    df.columns = df.columns.str.strip()
+    if "Register Number" not in df.columns:
+        return []
+
+    register_numbers = (
+        df["Register Number"]
+        .dropna()
+        .map(normalize_roll_number)
+    )
+    return sorted({register_number for register_number in register_numbers if register_number})
+
+
+def authenticate_user(
+    role: str,
+    username: str,
+    password: str,
+    student_registers: Iterable[str],
+) -> tuple[bool, dict[str, Any], str]:
+    clean_username = str(username or "").strip()
+
+    if role == "Student":
+        register_number = normalize_roll_number(clean_username)
+        password_roll = normalize_roll_number(password)
+        valid_registers = set(student_registers)
+        if register_number and password_roll == register_number and register_number in valid_registers:
+            return True, {"register_number": register_number}, register_number
+        return False, {}, clean_username
+
+    account = ROLE_USERS.get(role, {}).get(clean_username)
+    if account and str(password or "") == str(account.get("password", "")):
+        profile = {key: value for key, value in account.items() if key != "password"}
+        profile["account_id"] = clean_username
+        return True, profile, clean_username
+
+    return False, {}, clean_username
+
+
+def build_credential_table(student_registers: Iterable[str]) -> pd.DataFrame:
+    rows: list[dict[str, str]] = []
+    examples = list(student_registers)[:3]
+    if examples:
+        for register_number in examples:
+            rows.append(
+                {
+                    "Role": "Student",
+                    "Username": register_number,
+                    "Password": register_number,
+                    "Scope": "Own student dashboard",
+                }
+            )
+    else:
+        rows.append(
+            {
+                "Role": "Student",
+                "Username": "Any valid roll number",
+                "Password": "Same roll number",
+                "Scope": "Own student dashboard",
+            }
+        )
+
+    for role, users in ROLE_USERS.items():
+        for username, details in users.items():
+            scope_parts = []
+            if details.get("department"):
+                scope_parts.append(str(details["department"]))
+            if details.get("subjects"):
+                scope_parts.append(", ".join(map(str, details["subjects"])))
+            if details.get("mentees"):
+                scope_parts.append(f"{len(details['mentees'])} mentees")
+            rows.append(
+                {
+                    "Role": role,
+                    "Username": username,
+                    "Password": str(details.get("password", "")),
+                    "Scope": " | ".join(scope_parts) if scope_parts else "Institution",
+                }
+            )
+
+    return pd.DataFrame(rows)
+
+
+def render_intro_screen() -> None:
+    apply_intro_background()
+
+    st.markdown(
+        """
+        <div class="intro-cover">
+            <div class="intro-copy">
+                <div class="intro-kicker">Academic Intelligence Platform</div>
+                <div class="intro-title">Institutional Academic Intelligence</div>
+                <p class="intro-subtitle">
+                    A premium analytics workspace for student performance, mentoring, subject risk,
+                    and department-level academic decisions.
+                </p>
+                <div class="intro-prompt">Swipe up visually, or click to continue to secure login.</div>
+            </div>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if st.button("Enter Login", key="intro_enter_login"):
+        st.session_state["intro_seen"] = True
+        _rerun()
+
+
 def render_login_screen() -> None:
+    apply_login_background()
+
+    try:
+        student_registers = load_student_login_registers()
+        login_data_error = ""
+    except Exception as error:
+        student_registers = []
+        login_data_error = str(error)
+
     left_col, right_col = st.columns([1.1, 0.9], gap="large")
 
     with left_col:
-        render_page_header(
-            "Academic Intelligence Platform",
-            "Role-Based Academic Intelligence Dashboard",
-            (
-                "A streamlined Streamlit experience with role-specific dashboards, subject analytics, "
-                "new student projection, and safer Ollama-backed AI insights."
-            ),
-        )
-        render_html_panel(
-            "What changed",
-            [
-                "Single sidebar navigation instead of tab-heavy screens.",
-                "Hardcoded role-based login for Student, Faculty, Mentor, HOD, and Principal.",
-                "Cleaner dashboards that keep ML predictions and projection pipelines intact.",
-                "Centralized AI calls with timeout handling and user-friendly fallback messages.",
-            ],
+        st.markdown(
+            """
+            <div class="login-shell login-brand">
+                <div>
+                    <div class="hero-kicker">Academic Intelligence Platform</div>
+                    <div class="hero-title">Institutional Performance Workspace</div>
+                    <p class="hero-copy">
+                        Role-scoped academic intelligence for students, mentors, faculty, HODs, and leadership.
+                        The core prediction and analytics workflows stay intact while access is cleaner and safer.
+                    </p>
+                    <div class="login-badge-row">
+                        <span class="mini-badge">Student roll login</span>
+                        <span class="mini-badge">Scoped dashboards</span>
+                        <span class="mini-badge">Feedback insights</span>
+                        <span class="mini-badge">Protected AI calls</span>
+                    </div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
 
     with right_col:
-        st.subheader("Sign in")
-        st.caption("Use one of the hardcoded prototype accounts to open the relevant workspace.")
+        st.markdown(
+            """
+            <div class="login-shell login-access">
+                <div class="hero-kicker">Secure Prototype Access</div>
+                <div class="hero-title" style="font-size:1.55rem;">Sign in</div>
+                <p class="credential-note">
+                    Students use their register number as both username and password. Staff users use the
+                    prototype role accounts listed below.
+                </p>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
+
+        if login_data_error:
+            st.warning(f"Student register lookup is unavailable: {login_data_error}")
 
         with st.form("login_form", clear_on_submit=False):
-            role = st.selectbox("Role", list(AUTH_USERS.keys()), key="login_role")
+            role = st.selectbox("Role", ROLE_OPTIONS, key="login_role")
             username = st.text_input("Username", key="login_username")
             password = st.text_input("Password", type="password", key="login_password")
             submitted = st.form_submit_button("Log in", use_container_width=True)
 
         if submitted:
-            credentials = AUTH_USERS.get(role, {})
-            if (
-                username.strip() == str(credentials.get("user", "")).strip()
-                and password == credentials.get("pass")
-            ):
+            is_authenticated, profile, display_username = authenticate_user(
+                role,
+                username,
+                password,
+                student_registers,
+            )
+            if is_authenticated:
                 st.session_state["authenticated"] = True
                 st.session_state["user_role"] = role
-                st.session_state["username"] = username.strip()
-                st.session_state["user_profile"] = credentials
+                st.session_state["username"] = display_username
+                st.session_state["user_profile"] = profile
                 st.session_state["nav_section"] = ROLE_SECTIONS[role][0]
                 _rerun()
             else:
                 st.error("Invalid username or password for the selected role.")
 
         with st.expander("View prototype credentials"):
-            credential_table = pd.DataFrame(
-                [
-                    {
-                        "Role": role_name,
-                        "Username": details["user"],
-                        "Password": details["pass"],
-                    }
-                    for role_name, details in AUTH_USERS.items()
-                ]
+            st.dataframe(
+                build_credential_table(student_registers),
+                use_container_width=True,
+                hide_index=True,
             )
-            st.table(credential_table)
 
 
 def render_authenticated_app(df: pd.DataFrame, enriched_df: pd.DataFrame) -> None:
+    apply_dashboard_background()
+
     role = str(st.session_state.get("user_role") or "")
     context = get_role_context(enriched_df, role, st.session_state.get("user_profile", {}))
     section = render_sidebar(df, enriched_df, role, context)
@@ -393,7 +1145,7 @@ def render_sidebar(
         if not scope_df.empty and "Result_Binary" in scope_df.columns
         else 0.0
     )
-    health_score = calculate_health_score(scope_df if not scope_df.empty else enriched_df)
+    health_score = calculate_health_score(scope_df) if not scope_df.empty else 0.0
 
     with st.sidebar:
         st.markdown(
@@ -424,9 +1176,12 @@ def render_sidebar(
         metric_col3.metric("Pass rate", f"{pass_rate:.1f}%")
         metric_col4.metric("Health", f"{health_score:.1f}")
 
-        st.caption(
-            f"Institution dataset: {int(df['Register Number'].nunique())} students and {int(df['Course Code'].nunique())} subjects."
-        )
+        if role == "Principal":
+            st.caption(
+                f"Institution dataset: {int(df['Register Number'].nunique())} students and {int(df['Course Code'].nunique())} subjects."
+            )
+        else:
+            st.caption("Access is limited to the current role scope.")
         if st.button("Log out", use_container_width=True):
             logout()
 
@@ -496,6 +1251,160 @@ def render_ai_panel(
         st.markdown(report)
     else:
         st.info("No AI insight generated yet.")
+
+
+def clean_feedback_dataframe(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame(columns=["Roll Number"])
+
+    cleaned_df = df.copy()
+    cleaned_df.columns = [" ".join(str(column).strip().split()) for column in cleaned_df.columns]
+
+    roll_column = next(
+        (
+            column
+            for column in cleaned_df.columns
+            if " ".join(str(column).lower().split()) == "roll number"
+        ),
+        None,
+    )
+    if roll_column is None:
+        return pd.DataFrame(columns=["Roll Number"])
+
+    if roll_column != "Roll Number":
+        cleaned_df = cleaned_df.rename(columns={roll_column: "Roll Number"})
+
+    object_columns = cleaned_df.select_dtypes(include=["object"]).columns
+    for column in object_columns:
+        cleaned_df[column] = (
+            cleaned_df[column]
+            .astype(str)
+            .str.replace(r"\s+", " ", regex=True)
+            .str.strip()
+        )
+        cleaned_df.loc[
+            cleaned_df[column].str.lower().isin({"nan", "none", "nat"}),
+            column,
+        ] = ""
+
+    cleaned_df["Roll Number"] = cleaned_df["Roll Number"].map(normalize_roll_number)
+    cleaned_df = cleaned_df[cleaned_df["Roll Number"].astype(bool)].drop_duplicates(
+        subset=["Roll Number"],
+        keep="last",
+    )
+    return cleaned_df.reset_index(drop=True)
+
+
+@st.cache_data(show_spinner=False)
+def load_feedback_datasets() -> tuple[pd.DataFrame, pd.DataFrame]:
+    def read_feedback_csv(path: str) -> pd.DataFrame:
+        try:
+            return clean_feedback_dataframe(pd.read_csv(path))
+        except FileNotFoundError:
+            return pd.DataFrame(columns=["Roll Number"])
+        except Exception:
+            return pd.DataFrame(columns=["Roll Number"])
+
+    return read_feedback_csv(ACADEMIC_FEEDBACK_PATH), read_feedback_csv(CAREER_FEEDBACK_PATH)
+
+
+def get_feedback_record(feedback_df: pd.DataFrame, register_number: Any) -> dict[str, Any]:
+    if feedback_df.empty or "Roll Number" not in feedback_df.columns:
+        return {}
+
+    key = normalize_roll_number(register_number)
+    matches = feedback_df[feedback_df["Roll Number"] == key]
+    if matches.empty:
+        return {}
+    return matches.iloc[0].to_dict()
+
+
+def normalize_feedback_key(value: Any) -> str:
+    return " ".join(str(value or "").lower().split())
+
+
+def feedback_value_by_tokens(record: dict[str, Any], token_groups: Iterable[Iterable[str]]) -> str:
+    if not record:
+        return ""
+
+    normalized_keys = {
+        key: normalize_feedback_key(key)
+        for key in record.keys()
+    }
+    for tokens in token_groups:
+        normalized_tokens = [normalize_feedback_key(token) for token in tokens]
+        for key, normalized_key in normalized_keys.items():
+            if all(token in normalized_key for token in normalized_tokens):
+                value = str(record.get(key, "")).strip()
+                if value:
+                    return value
+    return ""
+
+
+def render_feedback_cards(
+    title: str,
+    subtitle: str,
+    record: dict[str, Any],
+    fields: list[tuple[str, list[tuple[str, ...]]]],
+) -> None:
+    cards = []
+    for label, token_groups in fields:
+        value = feedback_value_by_tokens(record, token_groups)
+        value_class = "feedback-value" if value else "feedback-value feedback-empty"
+        cards.append(
+            '<div class="feedback-card">'
+            f'<div class="feedback-label">{escape(label)}</div>'
+            f'<div class="{value_class}">{escape(value or "Not provided")}</div>'
+            "</div>"
+        )
+
+    feedback_html = "".join(
+        [
+            '<div class="feedback-section">',
+            '<div class="feedback-header"><div>',
+            f'<div class="feedback-title">{escape(title)}</div>',
+            f'<p class="feedback-subtitle">{escape(subtitle)}</p>',
+            "</div></div>",
+            f'<div class="feedback-grid">{"".join(cards)}</div>',
+            "</div>",
+        ]
+    )
+    st.markdown(feedback_html, unsafe_allow_html=True)
+
+
+def render_student_feedback_sections(register_number: Any) -> None:
+    academic_feedback_df, career_feedback_df = load_feedback_datasets()
+    academic_record = get_feedback_record(academic_feedback_df, register_number)
+    career_record = get_feedback_record(career_feedback_df, register_number)
+
+    render_feedback_cards(
+        "Academic Feedback Insights",
+        "Student-submitted academic signals joined by roll number.",
+        academic_record,
+        [
+            ("Subjects Struggled With", [("subjects", "struggle")]),
+            ("Learning Difficulties", [("specifically", "difficult"), ("makes", "difficult")]),
+            ("Learning Style", [("learn better",), ("learning style",)]),
+            ("Class Participation", [("participate", "class")]),
+            ("Comfort Asking Doubts", [("comfortable", "doubts")]),
+            ("Biggest Challenges", [("biggest challenges",)]),
+            ("Department Improvements", [("department", "improvement"), ("learning experience",)]),
+        ],
+    )
+
+    render_feedback_cards(
+        "Career & Future Support",
+        "Career readiness and placement-support needs joined by roll number.",
+        career_record,
+        [
+            ("Technical Skills", [("technical skills",)]),
+            ("Hackathon Participation", [("hackathons",), ("workshops", "competitions")]),
+            ("Career Interests", [("career path",), ("interested",)]),
+            ("Confidence Level", [("confident", "career choice")]),
+            ("Guidance Needs", [("guidance", "need"), ("internships", "placements")]),
+            ("Expected Department Support", [("expect", "department"), ("placement training",)]),
+        ],
+    )
 
 
 def render_role_dashboard(
@@ -591,6 +1500,8 @@ def render_student_dashboard(context: dict[str, Any]) -> None:
         else:
             st.dataframe(risk_view, use_container_width=True, hide_index=True)
 
+    render_student_feedback_sections(register_number)
+
     render_ai_panel(
         title="AI suggestions",
         description="Generate a concise student-facing intervention summary.",
@@ -604,50 +1515,53 @@ def render_faculty_dashboard(
     enriched_df: pd.DataFrame,
     context: dict[str, Any],
 ) -> None:
-    subject_meta = context.get("subject_meta")
     scope_df = context.get("scope_df", pd.DataFrame())
+    department = context.get("department", "Department")
+    handled_subjects = context.get("subjects", [])
 
     render_page_header(
         "Faculty Dashboard",
-        "Assigned Subject Performance",
-        "Faculty view is scoped to one subject, highlighting failure pressure, high-risk students, and immediate intervention points.",
+        f"{department} Handled Subjects",
+        "Faculty access is scoped to the assigned department and handled subjects, with weak students and subject failure analytics only.",
     )
 
-    if subject_meta is None or scope_df.empty:
-        st.error("No subject data is available for this faculty profile.")
+    render_html_panel(
+        "Handled subjects",
+        handled_subjects or ["No handled subjects configured for this faculty account."],
+    )
+
+    if scope_df.empty:
+        st.error("No subject data is available for this faculty profile and handled-subject scope.")
         return
 
     high_risk_students = get_high_risk_students(scope_df)
-    all_subjects = build_subject_summary(enriched_df)
-    subject_ranking = all_subjects[
-        ["Subject Label", "Fail Rate %", "High Risk Students", "Average GP"]
-    ].head(10)
+    subject_stats = build_subject_summary(scope_df)
+    weak_student_count = (
+        int(high_risk_students["Register Number"].nunique())
+        if not high_risk_students.empty
+        else 0
+    )
 
     render_metric_row(
         [
-            {"label": "Failure Rate", "value": f"{subject_meta['Fail Rate %']:.1f}%", "caption": "Assigned subject fail share"},
-            {"label": "Average Internal", "value": f"{subject_meta['Average Internal']:.1f}", "caption": "Average coursework mark"},
-            {"label": "Average External", "value": f"{subject_meta['Average External']:.1f}", "caption": "Average exam mark"},
-            {"label": "High-Risk Students", "value": str(int(subject_meta['High Risk Students'])), "caption": "Below threshold or failed"},
+            {"label": "Department", "value": str(department), "caption": "Role scope"},
+            {"label": "Handled Subjects", "value": str(scope_df["Course Name"].nunique()), "caption": "Matched in dataset"},
+            {"label": "Failure Rate", "value": f"{(1 - scope_df['Result_Binary'].mean()) * 100:.1f}%", "caption": "Handled-subject records"},
+            {"label": "Weak Students", "value": str(weak_student_count), "caption": "Failed, weak internal, or low confidence"},
         ]
     )
 
     chart_col, table_col = st.columns([1.2, 1], gap="large")
 
     with chart_col:
-        render_section_heading("Subject-wise failure view", "Performance spread for the assigned subject.")
-        chart_data = scope_df[["Student Name", "Internal Mark", "External Mark"]].sort_values(
-            ["Internal Mark", "External Mark"]
-        )
-        st.bar_chart(
-            chart_data.set_index("Student Name")[["Internal Mark", "External Mark"]],
-            use_container_width=True,
-        )
+        render_section_heading("Subject failure analytics", "Fail-rate pressure across handled subjects.")
+        subject_chart = subject_stats.set_index("Course Name")["Fail Rate %"]
+        st.bar_chart(subject_chart, use_container_width=True)
 
     with table_col:
-        render_section_heading("High-risk students", "Students who need follow-up in this subject.")
+        render_section_heading("Weak students", "Students who need follow-up in the handled subjects.")
         if high_risk_students.empty:
-            st.success("No high-risk students are currently flagged for this subject.")
+            st.success("No weak students are currently flagged for this faculty scope.")
         else:
             st.dataframe(
                 high_risk_students[
@@ -664,8 +1578,21 @@ def render_faculty_dashboard(
                 hide_index=True,
             )
 
-    render_section_heading("Subject ranking snapshot", "How the current subject sits against the rest of the dataset.")
-    st.dataframe(subject_ranking, use_container_width=True, hide_index=True)
+    render_section_heading("Handled subject summary", "Failure analytics limited to this faculty account.")
+    st.dataframe(
+        subject_stats[
+            [
+                "Subject Label",
+                "Students",
+                "Fail Rate %",
+                "High Risk Students",
+                "Weak Internal Students",
+                "Risk Level",
+            ]
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
 
 
 def render_mentor_dashboard(context: dict[str, Any]) -> None:
@@ -731,6 +1658,7 @@ def render_hod_dashboard(context: dict[str, Any]) -> None:
 
     subject_stats = build_subject_summary(scope_df)
     semester_summary = build_semester_summary(scope_df)
+    priority_table = build_student_priority_table(scope_df)
     health_score = calculate_health_score(scope_df)
 
     render_metric_row(
@@ -773,6 +1701,22 @@ def render_hod_dashboard(context: dict[str, Any]) -> None:
         use_container_width=True,
         hide_index=True,
     )
+
+    risk_col, students_col = st.columns([0.95, 1.25], gap="large")
+
+    with risk_col:
+        render_section_heading("Department risk distribution", "Student count by blended academic risk band.")
+        band_counts = (
+            priority_table["Risk Band"].value_counts().reindex(["High", "Moderate", "Low"], fill_value=0)
+            if not priority_table.empty
+            else pd.Series([0, 0, 0], index=["High", "Moderate", "Low"])
+        )
+        st.bar_chart(band_counts, use_container_width=True)
+
+    with students_col:
+        render_section_heading("Department students", "Students visible to this HOD account only.")
+        display_columns = ["Register Number", "Student Name", "Average GP", "Pass Rate %", "Risk Band"]
+        st.dataframe(priority_table[display_columns], use_container_width=True, hide_index=True)
 
     render_ai_panel(
         title="AI department summary",
@@ -979,38 +1923,37 @@ def render_student_subject_analytics(context: dict[str, Any]) -> None:
 
 
 def render_faculty_subject_analytics(context: dict[str, Any]) -> None:
-    subject_meta = context.get("subject_meta")
     scope_df = context.get("scope_df", pd.DataFrame())
+    department = context.get("department", "Department")
 
     render_page_header(
         "Subject Analytics",
-        "Faculty Subject Risk Analytics",
-        "Faculty subject analytics concentrate on the assigned course, the students at risk, and AI-backed next steps.",
+        f"{department} Faculty Subject Risk Analytics",
+        "Subject analytics are limited to the faculty account's department and handled subjects.",
     )
 
-    if subject_meta is None or scope_df.empty:
+    if scope_df.empty:
         st.error("Faculty subject analytics are unavailable for this profile.")
         return
 
     high_risk_students = get_high_risk_students(scope_df)
+    subject_stats = build_subject_summary(scope_df)
+    weakest_subject = subject_stats.iloc[0] if not subject_stats.empty else None
 
     render_metric_row(
         [
             {"label": "Students", "value": str(scope_df["Register Number"].nunique()), "caption": "Learners in subject"},
-            {"label": "Pass Rate", "value": f"{subject_meta['Pass Rate %']:.1f}%", "caption": "Historical success rate"},
-            {"label": "Average Gap", "value": f"{subject_meta['Average Gap']:.1f}", "caption": "Internal-external gap"},
-            {"label": "Weak Internals", "value": str(int(subject_meta['Weak Internal Students'])), "caption": "Below threshold internally"},
+            {"label": "Subjects", "value": str(scope_df["Course Name"].nunique()), "caption": "Handled subjects"},
+            {"label": "Pass Rate", "value": f"{scope_df['Result_Binary'].mean() * 100:.1f}%", "caption": "Historical success rate"},
+            {"label": "Weak Internals", "value": str(int(scope_df["Weak Internal"].sum())), "caption": "Below threshold internally"},
         ]
     )
 
     chart_col, table_col = st.columns([1.2, 1], gap="large")
 
     with chart_col:
-        render_section_heading("Student score spread", "Performance distribution inside the assigned subject.")
-        chart_data = scope_df[["Student Name", "Internal Mark", "External Mark"]].sort_values(
-            ["Internal Mark", "External Mark"]
-        )
-        st.bar_chart(chart_data.set_index("Student Name"), use_container_width=True)
+        render_section_heading("Subject failure spread", "Fail rate by handled subject.")
+        st.bar_chart(subject_stats.set_index("Course Name")["Fail Rate %"], use_container_width=True)
 
     with table_col:
         render_section_heading("Students needing intervention", "Failures, weak internals, and low prediction confidence.")
@@ -1032,21 +1975,46 @@ def render_faculty_subject_analytics(context: dict[str, Any]) -> None:
                 hide_index=True,
             )
 
+    render_section_heading("Handled subject analytics", "Subject failure analytics for this faculty account.")
+    st.dataframe(
+        subject_stats[
+            [
+                "Subject Label",
+                "Students",
+                "Pass Rate %",
+                "Fail Rate %",
+                "Average Gap",
+                "High Risk Students",
+                "Risk Level",
+            ]
+        ],
+        use_container_width=True,
+        hide_index=True,
+    )
+
     render_ai_panel(
         title="AI subject insight",
         description="Generate a short intervention plan for this subject.",
-        report_key=f"faculty_subject_ai_{subject_meta['Course Code']}",
+        report_key=f"faculty_subject_ai_{department}_{context.get('account_id', 'faculty')}",
         button_label="Generate subject analytics insight",
         generator=lambda: generate_subject_report(
             {
-                "course_code": subject_meta["Course Code"],
-                "course_name": subject_meta["Course Name"],
-                "semester": int(subject_meta["Sem No"]),
-                "pass_rate": round(float(subject_meta["Pass Rate %"]), 1),
-                "fail_rate": round(float(subject_meta["Fail Rate %"]), 1),
-                "avg_internal": round(float(subject_meta["Average Internal"]), 1),
-                "avg_external": round(float(subject_meta["Average External"]), 1),
-                "avg_gap": round(float(subject_meta["Average Gap"]), 1),
+                "course_code": "Multiple",
+                "course_name": (
+                    "Multiple handled subjects"
+                    if weakest_subject is None
+                    else str(weakest_subject["Course Name"])
+                ),
+                "semester": (
+                    "Multiple"
+                    if weakest_subject is None
+                    else int(weakest_subject["Sem No"])
+                ),
+                "pass_rate": round(float(scope_df["Result_Binary"].mean() * 100), 1),
+                "fail_rate": round(float((1 - scope_df["Result_Binary"].mean()) * 100), 1),
+                "avg_internal": round(float(scope_df["Internal Mark"].mean()), 1),
+                "avg_external": round(float(scope_df["External Mark"].mean()), 1),
+                "avg_gap": round(float(scope_df["Internal-External Gap"].mean()), 1),
                 "high_risk_students": high_risk_students["Student Name"].head(8).tolist(),
             }
         ),
@@ -1433,6 +2401,14 @@ def enrich_dataset(df: pd.DataFrame) -> pd.DataFrame:
         raise ValueError("Academic dataset is missing required columns: " + ", ".join(missing_columns))
 
     enriched_df = df.copy()
+    enriched_df["Register Number"] = enriched_df["Register Number"].map(normalize_roll_number)
+    for text_column in ["Department", "Student Name", "Course Code", "Course Name"]:
+        enriched_df[text_column] = (
+            enriched_df[text_column]
+            .astype(str)
+            .str.replace(r"\s+", " ", regex=True)
+            .str.strip()
+        )
     enriched_df["Internal-External Gap"] = enriched_df["Internal-External Gap"].fillna(
         enriched_df["Internal Mark"] - enriched_df["External Mark"]
     )
@@ -1774,7 +2750,7 @@ def build_student_profile(enriched_df: pd.DataFrame, reg_no: str | None) -> dict
         return None
 
     student_df = enriched_df[
-        enriched_df["Register Number"].astype(str) == str(reg_no)
+        enriched_df["Register Number"].map(normalize_roll_number) == normalize_roll_number(reg_no)
     ].copy().sort_values(["Sem No", "Course Name"])
 
     risk_subjects = (
@@ -1867,30 +2843,32 @@ def get_role_context(
         return context
 
     if role == "Faculty":
-        subject_stats = build_subject_summary(enriched_df)
-        subject_meta = resolve_subject_meta(subject_stats, context.get("course_code"))
-        if subject_meta is None:
-            context["scope_df"] = pd.DataFrame()
-            context["subject_meta"] = None
-            return context
-
-        scope_df = enriched_df[
-            (enriched_df["Course Code"].astype(str) == str(subject_meta["Course Code"]))
-            & (enriched_df["Course Name"].astype(str) == str(subject_meta["Course Name"]))
-        ].copy()
+        department = resolve_department(enriched_df, context.get("department"))
+        handled_subjects = [
+            str(subject).strip()
+            for subject in context.get("subjects", [])
+            if str(subject).strip()
+        ]
+        department_scope = filter_by_department(enriched_df, department)
+        scope_df = filter_by_subject_names(department_scope, handled_subjects)
+        subject_stats = build_subject_summary(scope_df)
+        subject_meta = None if subject_stats.empty else subject_stats.iloc[0]
         context.update(
             {
-                "course_code": str(subject_meta["Course Code"]),
-                "course_name": str(subject_meta["Course Name"]),
+                "department": department,
+                "subjects": handled_subjects,
                 "subject_meta": subject_meta,
+                "subject_stats": subject_stats,
                 "scope_df": scope_df,
             }
         )
         return context
 
     if role == "Mentor":
-        mentee_ids = resolve_mentee_ids(enriched_df, context.get("mentee_ids", []))
-        scope_df = enriched_df[enriched_df["Register Number"].astype(str).isin(mentee_ids)].copy()
+        mentee_ids = resolve_mentee_ids(enriched_df, context.get("mentees", context.get("mentee_ids", [])))
+        scope_df = enriched_df[
+            enriched_df["Register Number"].map(normalize_roll_number).isin(mentee_ids)
+        ].copy()
         context.update(
             {
                 "mentee_ids": mentee_ids,
@@ -1901,7 +2879,7 @@ def get_role_context(
 
     if role == "HOD":
         department = resolve_department(enriched_df, context.get("department"))
-        scope_df = enriched_df[enriched_df["Department"].astype(str) == str(department)].copy()
+        scope_df = filter_by_department(enriched_df, department)
         context.update(
             {
                 "department": department,
@@ -1915,12 +2893,12 @@ def get_role_context(
 
 
 def resolve_student_register_number(enriched_df: pd.DataFrame, configured_register: Any) -> str | None:
-    available = sorted(enriched_df["Register Number"].astype(str).unique().tolist())
+    available = sorted(enriched_df["Register Number"].map(normalize_roll_number).unique().tolist())
     if not available:
         return None
 
-    configured_value = str(configured_register).strip() if configured_register is not None else ""
-    return configured_value if configured_value in available else available[0]
+    configured_value = normalize_roll_number(configured_register)
+    return configured_value if configured_value in available else None
 
 
 def resolve_subject_meta(
@@ -1941,24 +2919,67 @@ def resolve_subject_meta(
 
 
 def resolve_mentee_ids(enriched_df: pd.DataFrame, configured_ids: Iterable[Any]) -> list[str]:
-    available = set(enriched_df["Register Number"].astype(str).unique().tolist())
-    configured = [str(value).strip() for value in configured_ids if str(value).strip() in available]
-    if configured:
-        return configured
-    return sorted(available)[:6]
+    available = set(enriched_df["Register Number"].map(normalize_roll_number).unique().tolist())
+    configured = [
+        normalize_roll_number(value)
+        for value in configured_ids
+        if normalize_roll_number(value) in available
+    ]
+    return configured
 
 
 def resolve_department(enriched_df: pd.DataFrame, configured_department: Any) -> str:
+    configured_key = normalize_department_key(configured_department)
     available = enriched_df["Department"].dropna().astype(str).unique().tolist()
-    if configured_department is not None and str(configured_department).strip() in available:
-        return str(configured_department).strip()
-    return available[0] if available else "Department"
+    for department in available:
+        if normalize_department_key(department) == configured_key:
+            return str(department).strip()
+    return DEPARTMENT_LABELS.get(configured_key, str(configured_department or "Department").strip())
 
 
 def filter_by_register_number(enriched_df: pd.DataFrame, register_number: str | None) -> pd.DataFrame:
     if register_number is None:
         return enriched_df.iloc[0:0].copy()
-    return enriched_df[enriched_df["Register Number"].astype(str) == str(register_number)].copy()
+    key = normalize_roll_number(register_number)
+    return enriched_df[enriched_df["Register Number"].map(normalize_roll_number) == key].copy()
+
+
+def normalize_department_key(value: Any) -> str:
+    normalized = " ".join(str(value or "").upper().strip().split())
+    for key, aliases in DEPARTMENT_ALIASES.items():
+        if normalized in aliases:
+            return key
+    return normalized
+
+
+def filter_by_department(enriched_df: pd.DataFrame, department: Any) -> pd.DataFrame:
+    if enriched_df.empty or "Department" not in enriched_df.columns:
+        return enriched_df.iloc[0:0].copy()
+
+    department_key = normalize_department_key(department)
+    return enriched_df[
+        enriched_df["Department"].map(normalize_department_key) == department_key
+    ].copy()
+
+
+def filter_by_subject_names(enriched_df: pd.DataFrame, subjects: Iterable[Any]) -> pd.DataFrame:
+    subject_keys = {
+        " ".join(str(subject).upper().strip().split())
+        for subject in subjects
+        if str(subject).strip()
+    }
+    if not subject_keys:
+        return enriched_df.iloc[0:0].copy()
+
+    course_name_keys = enriched_df["Course Name"].astype(str).map(
+        lambda value: " ".join(value.upper().strip().split())
+    )
+    course_code_keys = enriched_df["Course Code"].astype(str).map(
+        lambda value: " ".join(value.upper().strip().split())
+    )
+    return enriched_df[
+        course_name_keys.isin(subject_keys) | course_code_keys.isin(subject_keys)
+    ].copy()
 
 
 def get_high_risk_students(subject_df: pd.DataFrame) -> pd.DataFrame:
@@ -1994,9 +3015,11 @@ def build_scope_label(role: str, context: dict[str, Any]) -> str:
         return f"{student_name} | {register_number}"
 
     if role == "Faculty":
-        course_code = context.get("course_code", "")
-        course_name = context.get("course_name", "Assigned subject")
-        return f"{course_code} | {course_name}"
+        subjects = context.get("subjects", [])
+        subject_label = ", ".join(map(str, subjects[:2])) if subjects else "Handled subjects"
+        if len(subjects) > 2:
+            subject_label += f" +{len(subjects) - 2}"
+        return f"{context.get('department', 'Department')} | {subject_label}"
 
     if role == "Mentor":
         mentee_ids = context.get("mentee_ids", [])

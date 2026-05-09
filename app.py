@@ -5,6 +5,7 @@ from core.dashboard_views import (
     enrich_dataset,
     initialize_session_state,
     render_authenticated_app,
+    render_intro_screen,
     render_login_screen,
 )
 from core.preprocess import load_subject_data
@@ -20,6 +21,14 @@ st.set_page_config(
 def load_data():
     df = load_subject_data()
     df.columns = df.columns.str.strip()
+    if "Register Number" in df.columns:
+        df["Register Number"] = (
+            df["Register Number"]
+            .astype(str)
+            .str.upper()
+            .str.strip()
+            .str.replace(r"\s+", "", regex=True)
+        )
     return df
 
 
@@ -28,6 +37,9 @@ def main() -> None:
     initialize_session_state()
 
     if not st.session_state.get("authenticated"):
+        if not st.session_state.get("intro_seen"):
+            render_intro_screen()
+            return
         render_login_screen()
         return
 
