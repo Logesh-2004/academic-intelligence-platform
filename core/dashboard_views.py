@@ -5,6 +5,7 @@ from html import escape
 from pathlib import Path
 from typing import Any, Callable, Iterable
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 
@@ -128,6 +129,27 @@ ASSET_DIR = Path(__file__).resolve().parent.parent / "assets"
 LOGIN_BACKGROUND_PATH = ASSET_DIR / "login_bg.png"
 DASHBOARD_BACKGROUND_PATH = ASSET_DIR / "dashboard_bg.png"
 
+PRIMARY_COLOR = "#1e2842"
+SECONDARY_COLOR = "#32415f"
+BACKGROUND_COLOR = "#f5f7fb"
+CARD_BACKGROUND_COLOR = "#ffffff"
+TEXT_PRIMARY_COLOR = "#1e2842"
+TEXT_SECONDARY_COLOR = "#5f6b7a"
+BORDER_COLOR = "#d9e1ec"
+SUCCESS_COLOR = "#2e8b57"
+WARNING_COLOR = "#e0a800"
+DANGER_COLOR = "#d9534f"
+
+CHART_PALETTE = [
+    PRIMARY_COLOR,
+    SECONDARY_COLOR,
+    "#52637f",
+    "#7686a0",
+    SUCCESS_COLOR,
+    WARNING_COLOR,
+    DANGER_COLOR,
+]
+
 WEAK_MARK_THRESHOLD = 35
 HIGH_GAP_THRESHOLD = 20
 LOW_PASS_PROBABILITY = 0.60
@@ -171,6 +193,188 @@ def load_image_data_uri(path: str) -> str:
     return f"data:image/{suffix};base64,{encoded}"
 
 
+def _chart_long_form(data: pd.Series | pd.DataFrame) -> tuple[pd.DataFrame, list[str], bool]:
+    if isinstance(data, pd.Series):
+        category_name = str(data.index.name or "Category")
+        value_name = str(data.name or "Value")
+        chart_df = data.rename(value_name).reset_index()
+        category_column = chart_df.columns[0]
+        chart_df = chart_df.rename(columns={category_column: "Category", value_name: "Value"})
+        chart_df["Metric"] = value_name
+    else:
+        chart_df = data.copy()
+        category_name = str(chart_df.index.name or "Category")
+        chart_df = chart_df.reset_index()
+        category_column = chart_df.columns[0]
+        value_columns = [column for column in chart_df.columns if column != category_column]
+        chart_df = chart_df.melt(
+            id_vars=category_column,
+            value_vars=value_columns,
+            var_name="Metric",
+            value_name="Value",
+        ).rename(columns={category_column: "Category"})
+
+    chart_df["Category"] = chart_df["Category"].astype(str)
+    chart_df["Value"] = pd.to_numeric(chart_df["Value"], errors="coerce")
+    chart_df = chart_df.dropna(subset=["Value"])
+    category_order = chart_df["Category"].drop_duplicates().tolist()
+    has_multiple_metrics = chart_df["Metric"].nunique() > 1
+    chart_df.attrs["category_name"] = category_name
+    return chart_df, category_order, has_multiple_metrics
+
+
+def _apply_chart_theme(chart: alt.Chart) -> alt.Chart:
+    return (
+        chart.configure_view(strokeWidth=0, fill=CARD_BACKGROUND_COLOR)
+        .configure_axis(
+            gridColor=BORDER_COLOR,
+            domainColor=BORDER_COLOR,
+            tickColor=BORDER_COLOR,
+            labelColor=TEXT_SECONDARY_COLOR,
+            titleColor=TEXT_PRIMARY_COLOR,
+            labelFont="Segoe UI",
+            titleFont="Segoe UI",
+            labelFontSize=12,
+            titleFontSize=12,
+            titleFontWeight=700,
+        )
+        .configure_legend(
+            labelColor=TEXT_SECONDARY_COLOR,
+            titleColor=TEXT_PRIMARY_COLOR,
+            labelFont="Segoe UI",
+            titleFont="Segoe UI",
+            orient="bottom",
+            symbolType="square",
+        )
+    )
+
+
+def render_institutional_bar_chart(
+    data: pd.Series | pd.DataFrame,
+    *,
+    value_title: str = "Value",
+) -> None:
+    chart_df, category_order, has_multiple_metrics = _chart_long_form(data)
+    if chart_df.empty:
+        st.info("Chart data is unavailable for the current scope.")
+        return
+
+    height = min(520, max(280, 36 * max(len(category_order), 4)))
+    color_encoding = (
+        alt.Color("Metric:N", scale=alt.Scale(range=CHART_PALETTE), title=None)
+        if has_multiple_metrics
+        else alt.value(PRIMARY_COLOR)
+    )
+    chart = (
+        alt.Chart(chart_df)
+        .mark_bar(cornerRadiusEnd=5)
+        .encode(
+            y=alt.Y(
+                "Category:N",
+                sort=category_order,
+                title=None,
+                axis=alt.Axis(labelLimit=260, labelPadding=8),
+            ),
+            x=alt.X("Value:Q", title=value_title, axis=alt.Axis(grid=True)),
+            color=color_encoding,
+            tooltip=[
+                alt.Tooltip("Category:N", title=chart_df.attrs.get("category_name", "Category")),
+                alt.Tooltip("Metric:N", title="Metric"),
+                alt.Tooltip("Value:Q", title=value_title, format=",.1f"),
+            ],
+        )
+        .properties(height=height)
+    )
+
+    if has_multiple_metrics:
+        chart = chart.encode(yOffset=alt.YOffset("Metric:N", title=None))
+
+    st.altair_chart(_apply_chart_theme(chart), use_container_width=True)
+
+
+def render_institutional_line_chart(
+    data: pd.Series | pd.DataFrame,
+    *,
+    value_title: str = "Value",
+) -> None:
+    chart_df, category_order, has_multiple_metrics = _chart_long_form(data)
+    if chart_df.empty:
+        st.info("Chart data is unavailable for the current scope.")
+        return
+
+    chart = (
+        alt.Chart(chart_df)
+        .mark_line(point=alt.OverlayMarkDef(filled=True, size=64), strokeWidth=3)
+        .encode(
+            x=alt.X(
+                "Category:N",
+                sort=category_order,
+                title=chart_df.attrs.get("category_name", "Category"),
+                axis=alt.Axis(labelAngle=0, labelPadding=8),
+            ),
+            y=alt.Y("Value:Q", title=value_title, axis=alt.Axis(grid=True)),
+            color=alt.Color(
+                "Metric:N",
+                scale=alt.Scale(range=CHART_PALETTE),
+                title=None,
+                legend=alt.Legend() if has_multiple_metrics else None,
+            ),
+            tooltip=[
+                alt.Tooltip("Category:N", title=chart_df.attrs.get("category_name", "Category")),
+                alt.Tooltip("Metric:N", title="Metric"),
+                alt.Tooltip("Value:Q", title=value_title, format=",.1f"),
+            ],
+        )
+        .properties(height=320)
+    )
+
+    st.altair_chart(_apply_chart_theme(chart), use_container_width=True)
+
+
+def style_institutional_heatmap(heatmap: pd.DataFrame) -> pd.io.formats.style.Styler:
+    def cell_style(value: Any) -> str:
+        try:
+            intensity = max(0.0, min(float(value) / 100, 1.0))
+        except Exception:
+            intensity = 0.0
+        alpha = 0.06 + (0.5 * intensity)
+        text_color = "#ffffff" if intensity >= 0.7 else TEXT_PRIMARY_COLOR
+        return (
+            f"background-color: rgba(30, 40, 66, {alpha:.3f}); "
+            f"color: {text_color}; font-weight: 650;"
+        )
+
+    return (
+        heatmap.style.format("{:.1f}%")
+        .map(cell_style)
+        .set_properties(
+            **{
+                "border-color": BORDER_COLOR,
+                "padding": "0.58rem 0.7rem",
+            }
+        )
+        .set_table_styles(
+            [
+                {
+                    "selector": "th",
+                    "props": [
+                        ("background-color", PRIMARY_COLOR),
+                        ("color", "#ffffff"),
+                        ("border-color", BORDER_COLOR),
+                        ("font-weight", "750"),
+                    ],
+                },
+                {
+                    "selector": "td",
+                    "props": [
+                        ("border-color", BORDER_COLOR),
+                    ],
+                },
+            ]
+        )
+    )
+
+
 def apply_login_background() -> None:
     image_uri = load_image_data_uri(str(LOGIN_BACKGROUND_PATH))
     if not image_uri:
@@ -181,7 +385,7 @@ def apply_login_background() -> None:
         <style>
         .stApp {{
             position: relative;
-            background: #07111d !important;
+            background: #f5f7fb !important;
             overflow-x: hidden;
         }}
 
@@ -190,14 +394,13 @@ def apply_login_background() -> None:
             position: fixed;
             inset: 0;
             background-image:
-                linear-gradient(135deg, rgba(4, 11, 22, 0.74) 0%, rgba(9, 22, 35, 0.58) 46%, rgba(12, 31, 38, 0.54) 100%),
+                linear-gradient(135deg, rgba(255, 255, 255, 0.38) 0%, rgba(245, 247, 251, 0.28) 48%, rgba(255, 255, 255, 0.36) 100%),
                 url("{image_uri}");
             background-size: cover;
             background-position: center;
             background-repeat: no-repeat;
-            filter: blur(1.4px) brightness(0.84) saturate(0.98);
-            opacity: 0.98;
-            transform: scale(1.015);
+            filter: brightness(0.95) saturate(1.08) contrast(1.04);
+            opacity: 1;
             pointer-events: none;
             z-index: 0;
         }}
@@ -207,9 +410,7 @@ def apply_login_background() -> None:
             position: fixed;
             inset: 0;
             background:
-                radial-gradient(circle at 16% 18%, rgba(255, 255, 255, 0.16), transparent 24%),
-                radial-gradient(circle at 82% 12%, rgba(47, 143, 104, 0.2), transparent 28%),
-                linear-gradient(180deg, rgba(5, 12, 24, 0.18), rgba(5, 12, 24, 0.42));
+                linear-gradient(90deg, rgba(255, 255, 255, 0.18) 0%, rgba(255, 255, 255, 0.02) 46%, rgba(245, 247, 251, 0.18) 100%);
             pointer-events: none;
             z-index: 0;
         }}
@@ -230,38 +431,33 @@ def apply_login_background() -> None:
         }}
 
         .login-shell {{
-            background:
-                linear-gradient(145deg, rgba(255, 255, 255, 0.82), rgba(235, 244, 246, 0.68));
-            border: 1px solid rgba(255, 255, 255, 0.34);
+            background: rgba(255, 255, 255, 0.88);
+            border: 1px solid rgba(217, 225, 236, 0.82);
             box-shadow:
-                0 32px 80px rgba(0, 0, 0, 0.34),
-                0 2px 0 rgba(255, 255, 255, 0.58) inset,
-                0 -18px 34px rgba(14, 54, 70, 0.1) inset;
-            backdrop-filter: blur(20px);
+                0 28px 70px rgba(30, 40, 66, 0.18),
+                0 1px 0 rgba(255, 255, 255, 0.92) inset;
+            backdrop-filter: blur(22px) saturate(1.08);
         }}
 
         .login-brand {{
-            background:
-                linear-gradient(145deg, rgba(8, 22, 37, 0.84), rgba(24, 98, 128, 0.74) 58%, rgba(41, 118, 86, 0.76));
-            border-color: rgba(255, 255, 255, 0.26);
+            background: rgba(255, 255, 255, 0.84);
+            border-color: rgba(217, 225, 236, 0.86);
             box-shadow:
-                0 36px 90px rgba(0, 0, 0, 0.38),
-                0 2px 0 rgba(255, 255, 255, 0.2) inset;
+                0 30px 72px rgba(30, 40, 66, 0.16),
+                0 1px 0 rgba(255, 255, 255, 0.9) inset;
         }}
 
         .login-access {{
-            background:
-                linear-gradient(145deg, rgba(255, 255, 255, 0.9), rgba(238, 246, 247, 0.78));
-            border-top-color: rgba(30, 111, 143, 0.82);
+            background: rgba(255, 255, 255, 0.9);
+            border-top-color: #1e2842;
         }}
 
         div[data-testid="stForm"] {{
-            background:
-                linear-gradient(145deg, rgba(255, 255, 255, 0.94), rgba(241, 247, 248, 0.86));
-            border: 1px solid rgba(255, 255, 255, 0.42);
+            background: rgba(255, 255, 255, 0.94);
+            border: 1px solid rgba(217, 225, 236, 0.9);
             box-shadow:
-                0 30px 72px rgba(0, 0, 0, 0.28),
-                0 2px 0 rgba(255, 255, 255, 0.82) inset;
+                0 22px 54px rgba(30, 40, 66, 0.14),
+                0 1px 0 rgba(255, 255, 255, 0.95) inset;
             backdrop-filter: blur(18px);
         }}
         </style>
@@ -280,7 +476,7 @@ def apply_intro_background() -> None:
         <style>
         .stApp {{
             position: relative;
-            background: #07111d !important;
+            background: #f5f7fb !important;
             overflow-x: hidden;
         }}
 
@@ -289,12 +485,12 @@ def apply_intro_background() -> None:
             position: fixed;
             inset: 0;
             background-image:
-                linear-gradient(180deg, rgba(4, 11, 22, 0.18) 0%, rgba(4, 11, 22, 0.18) 48%, rgba(4, 11, 22, 0.5) 100%),
+                linear-gradient(90deg, rgba(255, 255, 255, 0.28) 0%, rgba(245, 247, 251, 0.2) 50%, rgba(255, 255, 255, 0.16) 100%),
                 url("{image_uri}");
             background-size: cover;
             background-position: center;
             background-repeat: no-repeat;
-            filter: brightness(0.9) saturate(1.02);
+            filter: brightness(0.94) saturate(1.12) contrast(1.04);
             pointer-events: none;
             z-index: 0;
         }}
@@ -304,7 +500,7 @@ def apply_intro_background() -> None:
             position: fixed;
             inset: 0;
             background:
-                linear-gradient(90deg, rgba(5, 12, 24, 0.52) 0%, rgba(5, 12, 24, 0.18) 44%, rgba(5, 12, 24, 0.2) 100%);
+                linear-gradient(180deg, rgba(255, 255, 255, 0), rgba(245, 247, 251, 0.1));
             pointer-events: none;
             z-index: 0;
         }}
@@ -335,8 +531,8 @@ def apply_intro_background() -> None:
 
         .intro-copy {{
             max-width: 720px;
-            color: #ffffff;
-            text-shadow: 0 14px 32px rgba(0, 0, 0, 0.36);
+            color: #1e2842;
+            text-shadow: none;
         }}
 
         .intro-kicker {{
@@ -344,9 +540,9 @@ def apply_intro_background() -> None:
             align-items: center;
             padding: 0.38rem 0.82rem;
             border-radius: 999px;
-            background: rgba(255, 255, 255, 0.16);
-            border: 1px solid rgba(255, 255, 255, 0.26);
-            color: #f2fbff;
+            background: rgba(255, 255, 255, 0.78);
+            border: 1px solid rgba(217, 225, 236, 0.86);
+            color: #1e2842;
             font-size: 0.78rem;
             font-weight: 850;
             text-transform: uppercase;
@@ -364,14 +560,14 @@ def apply_intro_background() -> None:
         .intro-subtitle {{
             max-width: 610px;
             margin: 0;
-            color: rgba(244, 250, 252, 0.9);
+            color: #5f6b7a;
             font-size: clamp(1rem, 1.5vw, 1.24rem);
             line-height: 1.6;
         }}
 
         .intro-prompt {{
             margin-top: 1.35rem;
-            color: rgba(244, 250, 252, 0.84);
+            color: #5f6b7a;
             font-size: 0.92rem;
             font-weight: 720;
         }}
@@ -381,22 +577,21 @@ def apply_intro_background() -> None:
             min-height: 3.1rem;
             margin-top: 1.1rem;
             border-radius: 999px;
-            border: 1px solid rgba(255, 255, 255, 0.36);
-            background:
-                linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(221, 240, 245, 0.9));
-            color: #102438;
+            border: 1px solid #1e2842;
+            background: #1e2842;
+            color: #ffffff;
             font-weight: 850;
             box-shadow:
-                0 24px 50px rgba(0, 0, 0, 0.28),
-                0 2px 0 rgba(255, 255, 255, 0.95) inset;
+                0 18px 34px rgba(30, 40, 66, 0.22),
+                0 1px 0 rgba(255, 255, 255, 0.18) inset;
             transition: transform 160ms ease, box-shadow 160ms ease;
         }}
 
         div[data-testid="stButton"] > button:hover {{
             transform: translateY(-2px);
             box-shadow:
-                0 30px 64px rgba(0, 0, 0, 0.34),
-                0 2px 0 rgba(255, 255, 255, 0.95) inset;
+                0 24px 44px rgba(30, 40, 66, 0.26),
+                0 1px 0 rgba(255, 255, 255, 0.18) inset;
         }}
         </style>
         """,
@@ -428,7 +623,7 @@ def apply_dashboard_background() -> None:
             background-size: contain;
             background-position: top right;
             background-repeat: no-repeat;
-            opacity: 0.078;
+            opacity: 0.12;
             filter: grayscale(4%) saturate(0.98);
             pointer-events: none;
             z-index: 0;
@@ -465,98 +660,184 @@ def apply_theme() -> None:
         """
         <style>
         :root {
+            --primary: #1e2842;
+            --secondary: #32415f;
             --bg: #f5f7fb;
-            --card: rgba(255, 255, 255, 0.84);
-            --card-strong: rgba(255, 255, 255, 0.94);
-            --border: rgba(35, 55, 85, 0.14);
-            --text: #162033;
-            --muted: #607089;
-            --accent: #1e6f8f;
-            --accent-2: #5b7c3b;
-            --accent-3: #a46a1f;
-            --accent-soft: rgba(30, 111, 143, 0.1);
-            --success: #2f8f68;
-            --shadow: 0 18px 42px rgba(36, 51, 77, 0.14);
-            --shadow-soft: 0 8px 24px rgba(36, 51, 77, 0.1);
+            --card: #ffffff;
+            --card-soft: rgba(255, 255, 255, 0.92);
+            --border: #d9e1ec;
+            --text: #1e2842;
+            --muted: #5f6b7a;
+            --accent: #1e2842;
+            --accent-soft: rgba(30, 40, 66, 0.08);
+            --success: #2e8b57;
+            --warning: #e0a800;
+            --danger: #d9534f;
+            --shadow: 0 18px 42px rgba(30, 40, 66, 0.12);
+            --shadow-soft: 0 8px 24px rgba(30, 40, 66, 0.08);
         }
 
         .stApp {
             background:
-                linear-gradient(135deg, rgba(218, 229, 235, 0.98) 0%, rgba(250, 247, 240, 0.96) 44%, rgba(228, 238, 229, 0.98) 100%);
-            background-color: #e8eef1;
+                linear-gradient(180deg, #f8fafd 0%, #f5f7fb 45%, #eef3f8 100%);
+            background-color: var(--bg);
             color: var(--text);
-            font-family: "Inter", "Segoe UI", "Trebuchet MS", sans-serif;
+            font-family: "Inter", "Segoe UI", Arial, sans-serif;
         }
 
         .block-container {
-            padding-top: 1.3rem;
-            padding-bottom: 2.2rem;
+            padding-top: 1.4rem;
+            padding-bottom: 2.4rem;
             max-width: 1440px;
         }
 
-        [data-testid="stSidebar"] {
-            background:
-                linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(239, 246, 244, 0.94) 100%);
-            border-right: 1px solid var(--border);
-            box-shadow: 12px 0 30px rgba(36, 51, 77, 0.08);
+        header[data-testid="stHeader"] {
+            background: rgba(245, 247, 251, 0.86);
+            backdrop-filter: blur(10px);
         }
 
+        [data-testid="stSidebar"] {
+            background: var(--primary) !important;
+            border-right: 1px solid rgba(255, 255, 255, 0.12);
+            box-shadow: 14px 0 34px rgba(30, 40, 66, 0.18);
+        }
+
+        [data-testid="stSidebar"] [data-testid="stSidebarContent"] {
+            background: var(--primary);
+        }
+
+        [data-testid="stSidebar"] h1,
+        [data-testid="stSidebar"] h2,
+        [data-testid="stSidebar"] h3,
+        [data-testid="stSidebar"] h4,
         [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p,
         [data-testid="stSidebar"] label,
-        [data-testid="stSidebar"] div {
-            color: var(--text);
+        [data-testid="stSidebar"] span,
+        [data-testid="stSidebar"] [data-testid="stCaptionContainer"] {
+            color: rgba(255, 255, 255, 0.9) !important;
+        }
+
+        [data-testid="stSidebar"] .hero-panel {
+            background: rgba(255, 255, 255, 0.08);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            box-shadow: 0 16px 34px rgba(0, 0, 0, 0.14);
+            backdrop-filter: blur(10px);
+        }
+
+        [data-testid="stSidebar"] .hero-kicker,
+        [data-testid="stSidebar"] .hero-title,
+        [data-testid="stSidebar"] .hero-copy {
+            color: #ffffff;
+        }
+
+        [data-testid="stSidebar"] .hero-kicker,
+        [data-testid="stSidebar"] .scope-pill {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            color: #ffffff;
+        }
+
+        [data-testid="stSidebar"] div[role="radiogroup"] {
+            display: flex;
+            flex-direction: column;
+            gap: 0.35rem;
+        }
+
+        [data-testid="stSidebar"] div[role="radiogroup"] label {
+            min-height: 2.45rem;
+            margin: 0;
+            padding: 0.52rem 0.65rem;
+            border: 1px solid transparent;
+            border-radius: 8px;
+            transition: background-color 150ms ease, border-color 150ms ease, box-shadow 150ms ease;
+        }
+
+        [data-testid="stSidebar"] div[role="radiogroup"] label:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.2);
+        }
+
+        [data-testid="stSidebar"] div[role="radiogroup"] label:has(input:checked) {
+            background: rgba(150, 174, 222, 0.24);
+            border-color: rgba(214, 226, 249, 0.5);
+            box-shadow:
+                inset 3px 0 0 #a9bce7,
+                0 0 22px rgba(169, 188, 231, 0.22);
+        }
+
+        [data-testid="stSidebar"] hr {
+            border-color: rgba(255, 255, 255, 0.16);
+        }
+
+        [data-testid="stSidebar"] div[data-testid="stMetric"] {
+            background: rgba(255, 255, 255, 0.08);
+            border-color: rgba(255, 255, 255, 0.16);
+            border-top-color: #a9bce7;
+            box-shadow: none;
+        }
+
+        [data-testid="stSidebar"] div[data-testid="stMetricLabel"],
+        [data-testid="stSidebar"] div[data-testid="stMetricValue"] {
+            color: #ffffff !important;
         }
 
         h1, h2, h3, h4 {
             color: var(--text);
             letter-spacing: 0;
+            font-weight: 800;
         }
 
         p, li, label, span {
             letter-spacing: 0;
         }
 
+        .stMarkdown,
+        div[data-testid="stMarkdownContainer"] {
+            color: var(--text);
+        }
+
         div[data-baseweb="select"] > div,
         div[data-baseweb="input"] > div,
         div[data-testid="stTextInput"] input,
-        div[data-testid="stNumberInput"] input {
-            background: rgba(255, 255, 255, 0.98);
+        div[data-testid="stNumberInput"] input,
+        textarea {
+            background: #ffffff;
             color: var(--text);
-            border: 1px solid rgba(22, 32, 51, 0.18);
-            border-radius: 12px;
-            box-shadow:
-                inset 0 1px 0 rgba(255, 255, 255, 0.9),
-                0 8px 18px rgba(36, 51, 77, 0.08);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-shadow: 0 5px 14px rgba(30, 40, 66, 0.06);
         }
 
         div[data-baseweb="select"] > div:focus-within,
         div[data-testid="stTextInput"] input:focus,
-        div[data-testid="stNumberInput"] input:focus {
-            border-color: rgba(30, 111, 143, 0.46);
+        div[data-testid="stNumberInput"] input:focus,
+        textarea:focus {
+            border-color: var(--primary);
             box-shadow:
-                0 0 0 3px rgba(30, 111, 143, 0.12),
-                0 10px 22px rgba(36, 51, 77, 0.1);
+                0 0 0 3px rgba(30, 40, 66, 0.12),
+                0 10px 22px rgba(30, 40, 66, 0.1);
         }
 
         div[data-testid="stFileUploader"] {
-            background: rgba(255, 255, 255, 0.76);
-            border: 1px dashed rgba(30, 111, 143, 0.34);
-            border-radius: 14px;
+            background: #ffffff;
+            border: 1px dashed rgba(30, 40, 66, 0.32);
+            border-radius: 8px;
             padding: 0.6rem;
+            box-shadow: var(--shadow-soft);
         }
 
         div[data-testid="stMetric"] {
-            background:
-                linear-gradient(145deg, rgba(255, 255, 255, 0.96), rgba(246, 250, 248, 0.9));
+            background: var(--card);
             border: 1px solid var(--border);
-            border-radius: 14px;
-            padding: 0.85rem 0.95rem;
+            border-top: 4px solid var(--primary);
+            border-radius: 8px;
+            padding: 0.9rem 1rem 0.95rem 1rem;
             box-shadow: var(--shadow-soft);
             transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
         }
 
         div[data-testid="stMetric"]:hover {
-            border-color: rgba(30, 111, 143, 0.28);
+            border-color: rgba(30, 40, 66, 0.24);
             box-shadow: var(--shadow);
             transform: translateY(-2px);
         }
@@ -564,51 +845,98 @@ def apply_theme() -> None:
         div[data-testid="stMetricLabel"] {
             color: var(--muted);
             font-weight: 750;
+            letter-spacing: 0;
         }
 
         div[data-testid="stMetricValue"] {
             color: var(--text);
+            font-weight: 820;
         }
 
         div[data-testid="stDataFrame"] {
             border: 1px solid var(--border);
-            border-radius: 14px;
+            border-radius: 8px;
             overflow: hidden;
-            background: rgba(255, 255, 255, 0.86);
+            background: #ffffff;
             box-shadow: var(--shadow-soft);
         }
 
-        button[kind="primary"] {
-            background: linear-gradient(135deg, #1e6f8f 0%, #2f8f68 100%);
-            border: none;
-            color: #ffffff;
-            border-radius: 12px;
-            box-shadow: 0 10px 22px rgba(30, 111, 143, 0.2);
+        div[data-testid="stDataFrame"] [role="columnheader"] {
+            background: var(--primary) !important;
+            color: #ffffff !important;
+            font-weight: 750 !important;
+            border-color: var(--secondary) !important;
         }
 
-        button[kind="secondary"] {
-            background: rgba(255, 255, 255, 0.9);
-            border: 1px solid var(--border);
-            color: var(--text);
-            border-radius: 12px;
-            transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
+        div[data-testid="stDataFrame"] [role="gridcell"] {
+            color: var(--text) !important;
+            border-color: var(--border) !important;
         }
 
-        button[kind="secondary"]:hover {
-            border-color: rgba(30, 111, 143, 0.32);
-            box-shadow: 0 8px 20px rgba(36, 51, 77, 0.12);
+        div[data-testid="stDataFrame"] [role="row"]:nth-child(even) [role="gridcell"] {
+            background: #f8fafd !important;
+        }
+
+        button[kind="primary"],
+        div[data-testid="stFormSubmitButton"] button {
+            background: var(--primary) !important;
+            border: 1px solid var(--primary) !important;
+            color: #ffffff !important;
+            border-radius: 8px;
+            box-shadow: 0 12px 24px rgba(30, 40, 66, 0.2);
+            font-weight: 780;
+            transition: transform 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+        }
+
+        button[kind="primary"]:hover,
+        div[data-testid="stFormSubmitButton"] button:hover {
+            background: var(--secondary) !important;
+            border-color: var(--secondary) !important;
+            box-shadow: 0 16px 32px rgba(30, 40, 66, 0.24);
             transform: translateY(-1px);
         }
 
+        button[kind="secondary"],
+        div[data-testid="stButton"] > button:not([kind="primary"]),
+        div[data-testid="stDownloadButton"] > button {
+            background: #ffffff !important;
+            border: 1px solid var(--primary) !important;
+            color: var(--primary) !important;
+            border-radius: 8px;
+            box-shadow: 0 8px 18px rgba(30, 40, 66, 0.08);
+            font-weight: 760;
+            transition: transform 140ms ease, border-color 140ms ease, box-shadow 140ms ease, background-color 140ms ease;
+        }
+
+        button[kind="secondary"]:hover,
+        div[data-testid="stButton"] > button:not([kind="primary"]):hover,
+        div[data-testid="stDownloadButton"] > button:hover {
+            background: #f8fafd !important;
+            border-color: var(--secondary) !important;
+            box-shadow: 0 12px 24px rgba(30, 40, 66, 0.14);
+            transform: translateY(-1px);
+        }
+
+        [data-testid="stSidebar"] div[data-testid="stButton"] > button {
+            background: rgba(255, 255, 255, 0.08) !important;
+            border-color: rgba(255, 255, 255, 0.34) !important;
+            color: #ffffff !important;
+            box-shadow: none;
+        }
+
+        [data-testid="stSidebar"] div[data-testid="stButton"] > button:hover {
+            background: rgba(255, 255, 255, 0.14) !important;
+            border-color: rgba(255, 255, 255, 0.48) !important;
+            box-shadow: 0 10px 22px rgba(0, 0, 0, 0.14);
+        }
+
         .hero-panel {
-            background:
-                linear-gradient(135deg, rgba(255, 255, 255, 0.96) 0%, rgba(239, 247, 247, 0.88) 58%, rgba(250, 245, 235, 0.86) 100%);
+            background: var(--card);
             border: 1px solid var(--border);
-            border-radius: 18px;
+            border-radius: 8px;
             padding: 1.35rem 1.5rem;
             box-shadow: var(--shadow);
             margin-bottom: 1rem;
-            backdrop-filter: blur(14px);
         }
 
         .hero-kicker {
@@ -622,6 +950,7 @@ def apply_theme() -> None:
             font-weight: 800;
             text-transform: uppercase;
             letter-spacing: 0;
+            border: 1px solid rgba(30, 40, 66, 0.1);
         }
 
         .hero-title {
@@ -642,11 +971,10 @@ def apply_theme() -> None:
         .panel {
             background: var(--card);
             border: 1px solid var(--border);
-            border-radius: 16px;
+            border-radius: 8px;
             padding: 1rem 1.05rem;
             box-shadow: var(--shadow-soft);
             margin-bottom: 1rem;
-            backdrop-filter: blur(14px);
         }
 
         .panel-title {
@@ -668,23 +996,22 @@ def apply_theme() -> None:
             gap: 0.35rem;
             border-radius: 999px;
             padding: 0.3rem 0.72rem;
-            background: rgba(47, 143, 104, 0.12);
-            color: var(--success);
+            background: rgba(30, 40, 66, 0.08);
+            color: var(--primary);
+            border: 1px solid rgba(30, 40, 66, 0.12);
             font-size: 0.82rem;
             font-weight: 700;
         }
 
         .login-shell {
-            background:
-                linear-gradient(145deg, rgba(255, 255, 255, 0.98), rgba(236, 244, 245, 0.94));
-            border: 1px solid rgba(22, 32, 51, 0.12);
-            border-radius: 20px;
+            background: rgba(255, 255, 255, 0.9);
+            border: 1px solid rgba(217, 225, 236, 0.84);
+            border-radius: 8px;
             padding: 1.25rem;
             box-shadow:
-                0 28px 60px rgba(36, 51, 77, 0.18),
-                0 2px 0 rgba(255, 255, 255, 0.92) inset,
-                0 -16px 32px rgba(30, 111, 143, 0.05) inset;
-            backdrop-filter: blur(16px);
+                0 28px 64px rgba(30, 40, 66, 0.16),
+                0 1px 0 rgba(255, 255, 255, 0.94) inset;
+            backdrop-filter: blur(20px) saturate(1.08);
             position: relative;
             overflow: hidden;
         }
@@ -695,65 +1022,51 @@ def apply_theme() -> None:
             flex-direction: column;
             justify-content: space-between;
             gap: 1rem;
-            background:
-                linear-gradient(145deg, #102438 0%, #1f6f8f 56%, #2f8f68 100%);
-            border-color: rgba(255, 255, 255, 0.28);
-            box-shadow:
-                0 32px 70px rgba(16, 36, 56, 0.3),
-                0 2px 0 rgba(255, 255, 255, 0.22) inset;
+            background: rgba(255, 255, 255, 0.84);
+            border-color: rgba(217, 225, 236, 0.88);
+            border-top: 4px solid var(--primary);
         }
 
         .login-brand::after {
-            content: "";
-            position: absolute;
-            right: -48px;
-            bottom: -54px;
-            width: 220px;
-            height: 150px;
-            border: 1px solid rgba(255, 255, 255, 0.18);
-            background:
-                linear-gradient(145deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.04));
-            transform: rotate(-12deg);
-            pointer-events: none;
+            display: none;
         }
 
         .login-brand .hero-kicker {
-            background: rgba(255, 255, 255, 0.16);
-            color: #e9fbff;
-            border: 1px solid rgba(255, 255, 255, 0.24);
+            background: rgba(30, 40, 66, 0.08);
+            color: var(--primary);
+            border: 1px solid rgba(30, 40, 66, 0.12);
         }
 
         .login-brand .hero-title {
-            color: #ffffff;
-            text-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
+            color: var(--primary);
+            text-shadow: none;
         }
 
         .login-brand .hero-copy {
-            color: rgba(244, 250, 252, 0.9);
+            color: var(--muted);
         }
 
         .login-access {
-            border-top: 4px solid #1e6f8f;
+            border-top: 4px solid var(--primary);
         }
 
         .login-access .hero-title {
-            color: #102438;
+            color: var(--primary);
         }
 
         div[data-testid="stForm"] {
-            background:
-                linear-gradient(145deg, rgba(255, 255, 255, 0.99), rgba(241, 246, 247, 0.96));
-            border: 1px solid rgba(22, 32, 51, 0.12);
-            border-radius: 18px;
+            background: rgba(255, 255, 255, 0.94);
+            border: 1px solid var(--border);
+            border-radius: 8px;
             padding: 1rem 1rem 1.15rem 1rem;
             box-shadow:
-                0 24px 52px rgba(36, 51, 77, 0.15),
-                0 2px 0 rgba(255, 255, 255, 0.95) inset;
+                0 20px 46px rgba(30, 40, 66, 0.12),
+                0 1px 0 rgba(255, 255, 255, 0.95) inset;
             margin-top: 0.9rem;
         }
 
         div[data-testid="stForm"] label {
-            color: #162033;
+            color: var(--primary);
             font-weight: 760;
         }
 
@@ -765,39 +1078,37 @@ def apply_theme() -> None:
         }
 
         .mini-badge {
-            border: 1px solid rgba(255, 255, 255, 0.22);
-            background: rgba(255, 255, 255, 0.14);
+            border: 1px solid rgba(30, 40, 66, 0.16);
+            background: rgba(255, 255, 255, 0.84);
             border-radius: 999px;
-            color: #f4fafc;
+            color: var(--primary);
             font-size: 0.82rem;
             font-weight: 700;
             padding: 0.35rem 0.7rem;
-            box-shadow: 0 10px 22px rgba(0, 0, 0, 0.12);
+            box-shadow: 0 8px 18px rgba(30, 40, 66, 0.08);
         }
 
         .credential-note {
-            color: #4f6077;
+            color: var(--muted);
             font-size: 0.9rem;
             line-height: 1.55;
             margin: 0.35rem 0 0.85rem 0;
         }
 
         div[data-testid="stExpander"] details {
-            background: rgba(255, 255, 255, 0.86);
-            border: 1px solid rgba(22, 32, 51, 0.12);
-            border-radius: 14px;
-            box-shadow: 0 16px 34px rgba(36, 51, 77, 0.1);
+            background: #ffffff;
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            box-shadow: var(--shadow-soft);
         }
 
         .feedback-section {
-            border: 1px solid rgba(30, 111, 143, 0.18);
-            background:
-                linear-gradient(145deg, rgba(255, 255, 255, 0.82), rgba(243, 249, 247, 0.72));
-            border-radius: 18px;
+            border: 1px solid var(--border);
+            background: #ffffff;
+            border-radius: 8px;
             box-shadow: var(--shadow-soft);
             padding: 1rem;
             margin: 1rem 0;
-            backdrop-filter: blur(16px);
         }
 
         .feedback-header {
@@ -830,19 +1141,18 @@ def apply_theme() -> None:
 
         .feedback-card {
             min-height: 118px;
-            border: 1px solid rgba(35, 55, 85, 0.12);
-            border-radius: 14px;
+            border: 1px solid var(--border);
+            border-radius: 8px;
             padding: 0.85rem;
-            background:
-                linear-gradient(150deg, rgba(255, 255, 255, 0.96), rgba(248, 246, 239, 0.78));
-            box-shadow: 0 10px 24px rgba(36, 51, 77, 0.08);
+            background: #ffffff;
+            box-shadow: 0 10px 24px rgba(30, 40, 66, 0.07);
             transition: transform 160ms ease, box-shadow 160ms ease, border-color 160ms ease;
         }
 
         .feedback-card:hover {
             transform: translateY(-2px);
-            border-color: rgba(30, 111, 143, 0.26);
-            box-shadow: 0 16px 32px rgba(36, 51, 77, 0.14);
+            border-color: rgba(30, 40, 66, 0.24);
+            box-shadow: 0 16px 32px rgba(30, 40, 66, 0.12);
         }
 
         .feedback-label {
@@ -864,6 +1174,12 @@ def apply_theme() -> None:
         .feedback-empty {
             color: var(--muted);
             font-style: italic;
+        }
+
+        div[data-testid="stAlert"] {
+            border-radius: 8px;
+            border: 1px solid var(--border);
+            box-shadow: var(--shadow-soft);
         }
 
         @media (max-width: 768px) {
@@ -1459,7 +1775,7 @@ def render_student_dashboard(context: dict[str, Any]) -> None:
         if trend_frame.empty:
             st.info("Semester trend will appear when student semester data is available.")
         else:
-            st.line_chart(trend_frame, use_container_width=True)
+            render_institutional_line_chart(trend_frame, value_title="Academic measure")
 
     with right_col:
         render_section_heading("Risk summary", "A simple view of immediate academic pressure areas.")
@@ -1556,7 +1872,7 @@ def render_faculty_dashboard(
     with chart_col:
         render_section_heading("Subject failure analytics", "Fail-rate pressure across handled subjects.")
         subject_chart = subject_stats.set_index("Course Name")["Fail Rate %"]
-        st.bar_chart(subject_chart, use_container_width=True)
+        render_institutional_bar_chart(subject_chart, value_title="Fail rate %")
 
     with table_col:
         render_section_heading("Weak students", "Students who need follow-up in the handled subjects.")
@@ -1631,7 +1947,7 @@ def render_mentor_dashboard(context: dict[str, Any]) -> None:
             if not priority_table.empty
             else pd.Series([0, 0, 0], index=["High", "Moderate", "Low"])
         )
-        st.bar_chart(band_counts, use_container_width=True)
+        render_institutional_bar_chart(band_counts, value_title="Students")
 
     with right_col:
         render_section_heading("Mentee list", "A compact view of all students assigned to this mentor.")
@@ -1678,14 +1994,14 @@ def render_hod_dashboard(context: dict[str, Any]) -> None:
         if heatmap.empty:
             st.info("Heatmap is unavailable because the department subject summary is empty.")
         else:
-            st.dataframe(heatmap.style.format("{:.1f}%").background_gradient(cmap="Reds"), use_container_width=True)
+            st.dataframe(style_institutional_heatmap(heatmap), use_container_width=True)
 
     with trend_col:
         render_section_heading("Semester trends", "Pass rate, GPA, and marks by semester.")
         trend_chart = semester_summary.set_index("Sem No")[
             ["Pass Rate %", "Average GP", "Average Internal", "Average External"]
         ]
-        st.line_chart(trend_chart, use_container_width=True)
+        render_institutional_line_chart(trend_chart, value_title="Academic measure")
 
     render_section_heading("Top weak subjects", "Most fragile subjects in the department right now.")
     st.dataframe(
@@ -1711,7 +2027,7 @@ def render_hod_dashboard(context: dict[str, Any]) -> None:
             if not priority_table.empty
             else pd.Series([0, 0, 0], index=["High", "Moderate", "Low"])
         )
-        st.bar_chart(band_counts, use_container_width=True)
+        render_institutional_bar_chart(band_counts, value_title="Students")
 
     with students_col:
         render_section_heading("Department students", "Students visible to this HOD account only.")
@@ -1805,7 +2121,7 @@ def render_principal_dashboard(
     semester_chart = semester_summary.set_index("Sem No")[
         ["Pass Rate %", "Average GP", "Average Internal", "Average External"]
     ]
-    st.line_chart(semester_chart, use_container_width=True)
+    render_institutional_line_chart(semester_chart, value_title="Academic measure")
 
     render_ai_panel(
         title="AI executive briefing",
@@ -1873,7 +2189,7 @@ def render_student_subject_analytics(context: dict[str, Any]) -> None:
         chart_data = profile["raw"][["Course Name", "Internal Mark", "External Mark"]].sort_values(
             ["Internal Mark", "External Mark"]
         )
-        st.bar_chart(chart_data.set_index("Course Name"), use_container_width=True)
+        render_institutional_bar_chart(chart_data.set_index("Course Name"), value_title="Marks")
 
     with table_col:
         render_section_heading("High gap subjects", "Subjects where exam conversion is weaker than coursework.")
@@ -1953,7 +2269,7 @@ def render_faculty_subject_analytics(context: dict[str, Any]) -> None:
 
     with chart_col:
         render_section_heading("Subject failure spread", "Fail rate by handled subject.")
-        st.bar_chart(subject_stats.set_index("Course Name")["Fail Rate %"], use_container_width=True)
+        render_institutional_bar_chart(subject_stats.set_index("Course Name")["Fail Rate %"], value_title="Fail rate %")
 
     with table_col:
         render_section_heading("Students needing intervention", "Failures, weak internals, and low prediction confidence.")
@@ -2054,7 +2370,7 @@ def render_mentor_subject_analytics(context: dict[str, Any]) -> None:
         if chart_data.empty:
             st.info("No recurring subject pressure points were found.")
         else:
-            st.bar_chart(chart_data, use_container_width=True)
+            render_institutional_bar_chart(chart_data, value_title="Students")
 
     with table_col:
         render_section_heading("Priority students", "Students who should be contacted first.")
@@ -2130,7 +2446,7 @@ def render_hod_subject_analytics(context: dict[str, Any]) -> None:
         if heatmap.empty:
             st.info("Heatmap is unavailable for the current dataset.")
         else:
-            st.dataframe(heatmap.style.format("{:.1f}%").background_gradient(cmap="Reds"), use_container_width=True)
+            st.dataframe(style_institutional_heatmap(heatmap), use_container_width=True)
 
     with table_col:
         render_section_heading("Highest-risk subjects", "Subjects ranked by fail rate and risk load.")
